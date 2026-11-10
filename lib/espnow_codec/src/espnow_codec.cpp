@@ -149,8 +149,6 @@ size_t encode(const Message& message, uint8_t* out, size_t capacity) {
 
 Decoded decode(const uint8_t* buf, size_t len, uint32_t my_group_id) {
   Decoded result{};
-  result.ok = false;
-  result.error = DecodeError::None;
   if (len < kHeaderBytes) {
     result.error = DecodeError::Truncated;
     return result;
