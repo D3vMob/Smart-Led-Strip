@@ -11,8 +11,8 @@ class EspNowLink {
   void begin();
   // Replaces the encrypted Member peers with every member except self.
   void set_members(const std::vector<sls::Mac>& members, const sls::Mac& self);
-  void send_hello(uint32_t group_id, const sls::Mac& self);
-  void send_ack(const sls::Mac& to, uint32_t group_id, const sls::Mac& self);
+  void send_hello(uint32_t group_id, const sls::Mac& self, const sls::PairingInfo& info);
+  void send_ack(const sls::Mac& to, uint32_t group_id, const sls::Mac& self, const sls::PairingInfo& info);
   // Pops received frames until one decodes cleanly; false once the queue is empty.
   bool poll(sls::Message& out, uint32_t my_group_id);
   sls::Mac self_mac() const;

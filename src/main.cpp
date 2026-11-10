@@ -1,6 +1,7 @@
 #include <Arduino.h>
 
 #include <memory>
+#include <variant>
 
 #include "blink.h"
 #include "button_gesture.h"
@@ -62,9 +63,11 @@ sls::Look pairing_look(uint32_t now_ms) {
   return look;
 }
 
-void apply_pairing_actions(const sls::PairingActions& actions) {
-  if (actions.send_hello) espnow.send_hello(pairing->group_id(), self_mac);
-  if (actions.send_ack_to) espnow.send_ack(*actions.send_ack_to, pairing->group_id(), self_mac);
+void apply_pairing_actions(const sls::PairingActions& actions, uint32_t now_ms) {
+  if (actions.send_hello) espnow.send_hello(pairing->group_id(), self_mac, pairing->pairing_info(now_ms));
+  if (actions.send_ack_to) {
+    espnow.send_ack(*actions.send_ack_to, pairing->group_id(), self_mac, pairing->pairing_info(now_ms));
+  }
   if (actions.group_formed) {
     save_group_members(pairing->members());
     clear_motion_master_keys();
@@ -97,17 +100,19 @@ void loop() {
   if (sensor.poll(now_ms, presence)) report_presence(presence);
   report_sensor_status(now_ms);
   if (button.update(digitalRead(BOOT_BUTTON_PIN) == LOW, now_ms) == sls::Gesture::LongPress) {
-    apply_pairing_actions(pairing->on_long_press(now_ms));
+    apply_pairing_actions(pairing->on_long_press(now_ms), now_ms);
   }
   sls::Message message;
   while (espnow.poll(message, pairing->group_id())) {
+    const sls::PairingInfo* info = std::get_if<sls::PairingInfo>(&message.body);
+    if (info == nullptr) continue;
     if (message.type == sls::MessageType::PairingHello) {
-      apply_pairing_actions(pairing->on_hello(message.sender, now_ms));
+      apply_pairing_actions(pairing->on_hello(message.sender, *info, now_ms), now_ms);
     } else if (message.type == sls::MessageType::PairingAck) {
-      apply_pairing_actions(pairing->on_ack(message.sender, now_ms));
+      apply_pairing_actions(pairing->on_ack(message.sender, *info, now_ms), now_ms);
     }
   }
-  apply_pairing_actions(pairing->on_tick(now_ms));
+  apply_pairing_actions(pairing->on_tick(now_ms), now_ms);
   scheduler.on_change(group_state, now_ms);
   if (scheduler.due(now_ms)) {
     save_group_state(group_state);

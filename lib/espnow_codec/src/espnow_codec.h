@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <variant>
+#include <vector>
 
 #include "group_state.h"
 
@@ -10,6 +11,7 @@ namespace sls {
 
 constexpr size_t kMaxMessageBytes = 250;
 constexpr uint8_t kProtocolVersion = 1;
+constexpr size_t kMaxGroupMembers = 8;
 
 using Mac = std::array<uint8_t, 6>;
 
@@ -40,11 +42,16 @@ struct ChannelMoved {
   uint8_t channel;
 };
 
+struct PairingInfo {
+  uint32_t window_age_ms;  // ms since the sender's first press of this pairing session
+  std::vector<Mac> members;  // sender's member table, at most kMaxGroupMembers
+};
+
 struct Message {
   MessageType type;
   uint32_t group_id;
   Mac sender;
-  std::variant<std::monostate, StateSync, Presence, ChannelMoved> body;
+  std::variant<std::monostate, StateSync, Presence, ChannelMoved, PairingInfo> body;
 };
 
 size_t encode(const Message& message, uint8_t* out, size_t capacity);

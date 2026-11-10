@@ -10,6 +10,10 @@ static const sls::Mac kSelf = {0x02, 0, 0, 0, 0, 0x01};
 static const sls::Mac kPeer = {0x02, 0, 0, 0, 0, 0x05};
 static const sls::Mac kLowPeer = {0x02, 0, 0, 0, 0, 0x00};
 
+static sls::PairingInfo solo(const sls::Mac& peer, uint32_t window_age_ms = 0) {
+  return sls::PairingInfo{window_age_ms, {peer}};
+}
+
 // Delivers each Unit's hellos to every other Unit with an open window, and
 // each ack back to the Unit it is addressed to.
 struct Radio {
@@ -19,8 +23,8 @@ struct Radio {
     if (!actions.send_hello) return;
     for (size_t to = 0; to < units.size(); ++to) {
       if (to == from || !units[to].window_open()) continue;
-      sls::PairingActions reply = units[to].on_hello(mac_of(from), now_ms);
-      if (reply.send_ack_to) units[from].on_ack(mac_of(to), now_ms);
+      sls::PairingActions reply = units[to].on_hello(mac_of(from), units[from].pairing_info(now_ms), now_ms);
+      if (reply.send_ack_to) units[from].on_ack(mac_of(to), units[to].pairing_info(now_ms), now_ms);
     }
   }
 
@@ -100,7 +104,7 @@ void test_hello_from_a_new_peer_adds_it_and_is_acked() {
   sls::Pairing pairing(kSelf);
   pairing.on_long_press(1000);
 
-  sls::PairingActions actions = pairing.on_hello(kPeer, 1100);
+  sls::PairingActions actions = pairing.on_hello(kPeer, solo(kPeer), 1100);
 
   TEST_ASSERT_EQUAL_UINT(2, pairing.members().size());
   TEST_ASSERT_TRUE(actions.send_ack_to.has_value());
@@ -110,9 +114,9 @@ void test_hello_from_a_new_peer_adds_it_and_is_acked() {
 void test_second_hello_from_the_same_peer_adds_nothing_and_is_not_acked() {
   sls::Pairing pairing(kSelf);
   pairing.on_long_press(1000);
-  pairing.on_hello(kPeer, 1100);
+  pairing.on_hello(kPeer, solo(kPeer), 1100);
 
-  sls::PairingActions actions = pairing.on_hello(kPeer, 2100);
+  sls::PairingActions actions = pairing.on_hello(kPeer, solo(kPeer), 2100);
 
   TEST_ASSERT_EQUAL_UINT(2, pairing.members().size());
   TEST_ASSERT_FALSE(actions.send_ack_to.has_value());
@@ -121,9 +125,9 @@ void test_second_hello_from_the_same_peer_adds_nothing_and_is_not_acked() {
 void test_ack_from_a_new_peer_adds_it_without_replying_and_members_stay_sorted() {
   sls::Pairing pairing(kSelf);
   pairing.on_long_press(1000);
-  pairing.on_hello(kPeer, 1100);
+  pairing.on_hello(kPeer, solo(kPeer), 1100);
 
-  sls::PairingActions actions = pairing.on_ack(kLowPeer, 1200);
+  sls::PairingActions actions = pairing.on_ack(kLowPeer, solo(kLowPeer), 1200);
 
   TEST_ASSERT_FALSE(actions.send_ack_to.has_value());
   TEST_ASSERT_EQUAL_UINT(3, pairing.members().size());
@@ -137,7 +141,7 @@ void test_group_id_is_fnv1a_of_the_lowest_member_mac() {
   TEST_ASSERT_EQUAL_HEX32(0x772375FC, pairing.group_id());
 
   pairing.on_long_press(1000);
-  pairing.on_hello(kLowPeer, 1100);
+  pairing.on_hello(kLowPeer, solo(kLowPeer), 1100);
   TEST_ASSERT_EQUAL_HEX32(0x7823778F, pairing.group_id());
 }
 
@@ -181,11 +185,12 @@ void test_ninth_hello_is_refused_without_evicting_anyone() {
   sls::Pairing pairing(kSelf);
   pairing.on_long_press(1000);
   for (uint8_t i = 0; i < 7; ++i) {
-    pairing.on_hello({0x02, 0, 0, 0, 0, uint8_t(0x10 + i)}, 1100);
+    const sls::Mac peer = {0x02, 0, 0, 0, 0, uint8_t(0x10 + i)};
+    pairing.on_hello(peer, solo(peer), 1100);
   }
   TEST_ASSERT_EQUAL_UINT(8, pairing.members().size());
 
-  sls::PairingActions actions = pairing.on_hello(kLowPeer, 1200);
+  sls::PairingActions actions = pairing.on_hello(kLowPeer, solo(kLowPeer), 1200);
 
   TEST_ASSERT_EQUAL_UINT(8, pairing.members().size());
   TEST_ASSERT_TRUE(kSelf == pairing.members().front());
@@ -196,10 +201,11 @@ void test_ninth_ack_is_ignored() {
   sls::Pairing pairing(kSelf);
   pairing.on_long_press(1000);
   for (uint8_t i = 0; i < 7; ++i) {
-    pairing.on_hello({0x02, 0, 0, 0, 0, uint8_t(0x10 + i)}, 1100);
+    const sls::Mac peer = {0x02, 0, 0, 0, 0, uint8_t(0x10 + i)};
+    pairing.on_hello(peer, solo(peer), 1100);
   }
 
-  pairing.on_ack(kLowPeer, 1200);
+  pairing.on_ack(kLowPeer, solo(kLowPeer), 1200);
 
   TEST_ASSERT_EQUAL_UINT(8, pairing.members().size());
   TEST_ASSERT_TRUE(kSelf == pairing.members().front());
@@ -210,8 +216,8 @@ void test_hello_and_ack_after_the_window_closes_are_ignored() {
   pairing.on_long_press(1000);
   pairing.on_tick(31000);
 
-  sls::PairingActions hello = pairing.on_hello(kPeer, 32000);
-  pairing.on_ack(kLowPeer, 32100);
+  sls::PairingActions hello = pairing.on_hello(kPeer, solo(kPeer), 32000);
+  pairing.on_ack(kLowPeer, solo(kLowPeer), 32100);
 
   TEST_ASSERT_FALSE(hello.send_ack_to.has_value());
   TEST_ASSERT_FALSE(pairing.window_open());
@@ -221,7 +227,7 @@ void test_hello_and_ack_after_the_window_closes_are_ignored() {
 void test_hello_before_any_press_is_ignored() {
   sls::Pairing pairing(kSelf);
 
-  sls::PairingActions hello = pairing.on_hello(kPeer, 500);
+  sls::PairingActions hello = pairing.on_hello(kPeer, solo(kPeer), 500);
 
   TEST_ASSERT_FALSE(hello.send_ack_to.has_value());
   TEST_ASSERT_FALSE(pairing.window_open());
@@ -243,7 +249,7 @@ void test_unit_with_no_peers_closes_as_a_group_of_one() {
 void test_new_long_press_starts_pairing_fresh_as_a_group_of_one() {
   sls::Pairing pairing(kSelf);
   pairing.on_long_press(1000);
-  pairing.on_hello(kPeer, 1100);
+  pairing.on_hello(kPeer, solo(kPeer), 1100);
   pairing.on_tick(31000);
   TEST_ASSERT_EQUAL_UINT(2, pairing.members().size());
 
@@ -282,6 +288,48 @@ void test_restored_group_is_deduplicated_and_capped_at_eight() {
   TEST_ASSERT_FALSE(restored.window_open());
 }
 
+void ninth_unit_checks(const std::vector<uint32_t>& presses, const std::vector<sls::Mac>& macs, size_t refused) {
+  Radio radio(macs);
+  radio.run(presses, 80000);
+
+  TEST_ASSERT_EQUAL_UINT(1, radio.units[refused].members().size());
+  TEST_ASSERT_TRUE(macs[refused] == radio.units[refused].members().front());
+  const size_t first = refused == 0 ? 1 : 0;
+  for (size_t i = 0; i < macs.size(); ++i) {
+    if (i == refused) continue;
+    TEST_ASSERT_EQUAL_UINT(8, radio.units[i].members().size());
+    TEST_ASSERT_TRUE(radio.units[first].members() == radio.units[i].members());
+    TEST_ASSERT_EQUAL_HEX32(radio.units[first].group_id(), radio.units[i].group_id());
+    TEST_ASSERT_TRUE(std::find(radio.units[i].members().begin(), radio.units[i].members().end(), macs[refused]) ==
+                     radio.units[i].members().end());
+  }
+}
+
+void test_nine_units_pressed_at_once_refuse_the_highest_mac() {
+  std::vector<sls::Mac> macs;
+  for (uint8_t i = 0; i < 9; ++i) macs.push_back({0x02, 0, 0, 0, 0, uint8_t(0x20 + i)});
+  ninth_unit_checks(std::vector<uint32_t>(9, 1000), macs, 8);
+}
+
+void test_nine_units_pressed_one_after_another_refuse_the_last_pressed() {
+  std::vector<sls::Mac> macs;
+  for (uint8_t i = 0; i < 8; ++i) macs.push_back({0x02, 0, 0, 0, 0, uint8_t(0x20 + i)});
+  macs.push_back({0x02, 0, 0, 0, 0, 0x01});
+  std::vector<uint32_t> presses;
+  for (uint32_t i = 0; i < 9; ++i) presses.push_back(1000 + i * 1000);
+  ninth_unit_checks(presses, macs, 8);
+}
+
+void test_ninth_unit_pressed_after_the_first_window_closed_is_refused() {
+  std::vector<sls::Mac> macs;
+  for (uint8_t i = 0; i < 8; ++i) macs.push_back({0x02, 0, 0, 0, 0, uint8_t(0x20 + i)});
+  macs.push_back({0x02, 0, 0, 0, 0, 0x01});
+  std::vector<uint32_t> presses{0};
+  for (uint32_t i = 0; i < 7; ++i) presses.push_back(10000 + i * 1000);
+  presses.push_back(31000);
+  ninth_unit_checks(presses, macs, 8);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_long_press_opens_the_window_and_broadcasts_a_hello_right_away);
@@ -306,5 +354,8 @@ int main(int, char**) {
   RUN_TEST(test_new_long_press_starts_pairing_fresh_as_a_group_of_one);
   RUN_TEST(test_restored_group_has_the_persisted_table_and_the_same_group_id);
   RUN_TEST(test_restored_group_is_deduplicated_and_capped_at_eight);
+  RUN_TEST(test_nine_units_pressed_at_once_refuse_the_highest_mac);
+  RUN_TEST(test_nine_units_pressed_one_after_another_refuse_the_last_pressed);
+  RUN_TEST(test_ninth_unit_pressed_after_the_first_window_closed_is_refused);
   return UNITY_END();
 }

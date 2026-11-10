@@ -85,13 +85,14 @@ void EspNowLink::send(const sls::Mac& to, const sls::Message& message) {
   esp_now_send(to.data(), buffer, length);
 }
 
-void EspNowLink::send_hello(uint32_t group_id, const sls::Mac& self) {
-  send(kBroadcast, sls::Message{sls::MessageType::PairingHello, group_id, self, {}});
+void EspNowLink::send_hello(uint32_t group_id, const sls::Mac& self, const sls::PairingInfo& info) {
+  send(kBroadcast, sls::Message{sls::MessageType::PairingHello, group_id, self, info});
 }
 
-void EspNowLink::send_ack(const sls::Mac& to, uint32_t group_id, const sls::Mac& self) {
+void EspNowLink::send_ack(const sls::Mac& to, uint32_t group_id, const sls::Mac& self,
+                          const sls::PairingInfo& info) {
   if (!esp_now_is_peer_exist(to.data())) add_peer(to, false);
-  send(to, sls::Message{sls::MessageType::PairingAck, group_id, self, {}});
+  send(to, sls::Message{sls::MessageType::PairingAck, group_id, self, info});
 }
 
 bool EspNowLink::poll(sls::Message& out, uint32_t my_group_id) {
