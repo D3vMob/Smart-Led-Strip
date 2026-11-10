@@ -11,7 +11,7 @@ namespace matter_endpoints {
 
 // Registers the endpoints with the initial Group state, starts Matter and,
 // when the Unit is not commissioned yet, prints the QR code URL and manual
-// pairing code on serial.
+// pairing code on serial (repeated every 5 s by sync() until commissioned).
 void begin(const sls::GroupState& initial);
 
 // Applies the writes received since the last call to the Group state, then

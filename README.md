@@ -19,7 +19,7 @@ The app always shows the real state: a dim below 10% reads back as 10%, and chan
 ## Adding a Unit (commissioning)
 
 1. Flash the firmware: `pio run -t upload`.
-2. Open the serial monitor: `pio device monitor`. A Unit that isn't commissioned prints a QR code URL and a manual pairing code at boot.
+2. Open the serial monitor: `pio device monitor`. A Unit that isn't commissioned prints a QR code URL and a manual pairing code every 5 seconds until it is added.
 3. In Alexa or Google Home, add a Matter device and scan the QR code (open the URL to display it) or type the manual code. Commissioning runs over Bluetooth, and the app hands the Unit your Wi-Fi credentials; no network name is built into the firmware.
 
 ## Wiping a Unit (leaving a fabric)

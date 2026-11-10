@@ -29,6 +29,19 @@ bool apply(bool maps, const sls::Command& command) {
   return true;
 }
 
+// USB serial output at boot is gone before a monitor attaches, so an
+// uncommissioned Unit repeats its pairing codes until it is added.
+constexpr uint32_t kPairingReprintMs = 5000;
+uint32_t pairing_printed_ms = 0;
+
+void print_pairing_codes(uint32_t now_ms) {
+  if (Matter.isDeviceCommissioned()) return;
+  pairing_printed_ms = now_ms;
+  Serial.println("Matter: not commissioned. Add the Unit in Alexa or Google Home with:");
+  Serial.printf("  QR code URL: %s\n", Matter.getOnboardingQRCodeUrl().c_str());
+  Serial.printf("  Manual pairing code: %s\n", Matter.getManualPairingCode().c_str());
+}
+
 }  // namespace
 
 void begin(const sls::GroupState& initial_state) {
@@ -82,14 +95,13 @@ void begin(const sls::GroupState& initial_state) {
   // Commissioning is the standard BLE flow: the phone app hands over the Wi-Fi
   // credentials, so no SSID is set here.
   Matter.begin();
-  if (!Matter.isDeviceCommissioned()) {
-    Serial.println("Matter: not commissioned. Add the Unit in Alexa or Google Home with:");
-    Serial.printf("  QR code URL: %s\n", Matter.getOnboardingQRCodeUrl().c_str());
-    Serial.printf("  Manual pairing code: %s\n", Matter.getManualPairingCode().c_str());
-  }
+  print_pairing_codes(millis());
 }
 
 void sync(sls::GroupState& state) {
+  const uint32_t now_ms = millis();
+  if (now_ms - pairing_printed_ms >= kPairingReprintMs) print_pairing_codes(now_ms);
+
   sls::Command command;
   while (xQueueReceive(pending, &command, 0) == pdTRUE) state = sls::apply(state, command);
 
