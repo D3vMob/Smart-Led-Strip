@@ -233,6 +233,7 @@ static sls::Message sample_message(sls::MessageType type) {
     case sls::MessageType::Heartbeat: {
       sls::StateSync sync{};
       sync.state.look.brightness_pct = 50;  // a Look a receiver would accept
+      sync.state.look.blink_speed_pct = 20;
       message.body = sync;
       break;
     }
@@ -359,6 +360,16 @@ void test_blink_speed_above_100_percent_is_rejected_as_bad_value() {
 
 void test_blink_speed_of_100_percent_is_accepted() {
   TEST_ASSERT_TRUE(decode_sample_state_with_byte(kBlinkSpeedOffset, 100).ok);
+}
+
+void test_blink_speed_of_0_percent_is_rejected_as_bad_value() {
+  sls::Decoded decoded = decode_sample_state_with_byte(kBlinkSpeedOffset, 0);
+  TEST_ASSERT_FALSE(decoded.ok);
+  TEST_ASSERT_TRUE(decoded.error == sls::DecodeError::BadValue);
+}
+
+void test_blink_speed_of_1_percent_is_accepted() {
+  TEST_ASSERT_TRUE(decode_sample_state_with_byte(kBlinkSpeedOffset, 1).ok);
 }
 
 void test_encoded_length_is_within_the_esp_now_limit() {
@@ -499,6 +510,8 @@ int main() {
   RUN_TEST(test_brightness_of_10_and_100_percent_is_accepted);
   RUN_TEST(test_blink_speed_above_100_percent_is_rejected_as_bad_value);
   RUN_TEST(test_blink_speed_of_100_percent_is_accepted);
+  RUN_TEST(test_blink_speed_of_0_percent_is_rejected_as_bad_value);
+  RUN_TEST(test_blink_speed_of_1_percent_is_accepted);
   RUN_TEST(test_encoded_length_is_within_the_esp_now_limit);
   RUN_TEST(test_encode_into_too_small_buffer_returns_zero_and_writes_nothing_past_capacity);
   RUN_TEST(test_encode_rejects_body_that_does_not_match_the_type);

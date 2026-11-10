@@ -78,7 +78,7 @@ bool look_is_valid(const uint8_t* b) {
   if (b[0] > static_cast<uint8_t>(ColorMode::ColorTemp)) return false;
   if (get16(b + 1) >= kHueDegrees) return false;
   if (b[6] < kMinOpenLevelPct || b[6] > kMaxLevelPct) return false;
-  if (b[8] > kMaxLevelPct) return false;
+  if (clamp_blink_speed(b[8]) != b[8]) return false;
   return true;
 }
 
