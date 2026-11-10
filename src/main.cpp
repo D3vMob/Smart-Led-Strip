@@ -1,9 +1,15 @@
 #include <Arduino.h>
 
+#include <memory>
+
 #include "blink.h"
+#include "button_gesture.h"
 #include "config.h"
+#include "espnow_link.h"
 #include "group_state.h"
+#include "group_store.h"
 #include "ld2410_uart.h"
+#include "pairing.h"
 #include "save_scheduler.h"
 #include "state_store.h"
 #include "strip_output.h"
@@ -17,6 +23,10 @@ Ld2410Uart sensor(Serial1, LD2410_RX_PIN, LD2410_TX_PIN, LD2410_DETECT_TIMEOUT_M
 sls::GroupState group_state = sls::default_group_state();
 sls::SaveScheduler scheduler(group_state, PERSIST_SETTLE_MS);
 sls::BlinkClock blink_clock;
+sls::ButtonGesture button;
+EspNowLink espnow;
+sls::Mac self_mac = {};
+std::unique_ptr<sls::Pairing> pairing;
 SensorStatus reported_status = SensorStatus::Probing;
 bool reported_present = false;
 
@@ -39,6 +49,32 @@ void report_presence(const sls::ld2410::Presence& presence) {
   reported_present = presence.present;
 }
 
+// Breathing cyan shown while the pairing window is open: a 1 s triangle wave, 10-60 % brightness.
+sls::Look pairing_look(uint32_t now_ms) {
+  const uint32_t phase = now_ms % 1000;
+  const uint32_t rise = phase < 500 ? phase : 1000 - phase;  // 0..500
+  sls::Look look = group_state.look;
+  look.color_mode = sls::ColorMode::HueSat;
+  look.hue_deg = 180;
+  look.saturation = 255;  // full saturation (0-255 scale)
+  look.brightness_pct = static_cast<uint8_t>(10 + rise * 50 / 500);
+  look.blink_on = false;
+  return look;
+}
+
+void apply_pairing_actions(const sls::PairingActions& actions) {
+  if (actions.send_hello) espnow.send_hello(pairing->group_id(), self_mac);
+  if (actions.send_ack_to) espnow.send_ack(*actions.send_ack_to, pairing->group_id(), self_mac);
+  if (actions.group_formed) {
+    save_group_members(pairing->members());
+    clear_motion_master_keys();
+    espnow.set_members(pairing->members(), self_mac);
+    Serial.printf("Group formed: id %08x, %u member(s)\n",
+                  static_cast<unsigned>(pairing->group_id()),
+                  static_cast<unsigned>(pairing->members().size()));
+  }
+}
+
 }  // namespace
 
 void setup() {
@@ -48,6 +84,11 @@ void setup() {
   // The Strip comes back the way it was left; a fresh Unit starts in the defaults (Closed).
   group_state = load_group_state();
   scheduler = sls::SaveScheduler(group_state, PERSIST_SETTLE_MS);
+  pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
+  espnow.begin();
+  self_mac = espnow.self_mac();
+  pairing = std::make_unique<sls::Pairing>(self_mac, load_group_members());
+  espnow.set_members(pairing->members(), self_mac);
 }
 
 void loop() {
@@ -55,13 +96,29 @@ void loop() {
   sls::ld2410::Presence presence;
   if (sensor.poll(now_ms, presence)) report_presence(presence);
   report_sensor_status(now_ms);
+  if (button.update(digitalRead(BOOT_BUTTON_PIN) == LOW, now_ms) == sls::Gesture::LongPress) {
+    apply_pairing_actions(pairing->on_long_press(now_ms));
+  }
+  sls::Message message;
+  while (espnow.poll(message, pairing->group_id())) {
+    if (message.type == sls::MessageType::PairingHello) {
+      apply_pairing_actions(pairing->on_hello(message.sender, now_ms));
+    } else if (message.type == sls::MessageType::PairingAck) {
+      apply_pairing_actions(pairing->on_ack(message.sender, now_ms));
+    }
+  }
+  apply_pairing_actions(pairing->on_tick(now_ms));
   scheduler.on_change(group_state, now_ms);
   if (scheduler.due(now_ms)) {
     save_group_state(group_state);
   }
   const uint32_t phase = blink_clock.phase_ms(now_ms, sls::blink_period_ms(group_state.look.blink_speed_pct));
   const bool lit = sls::blink_lit(group_state.look, group_state.open, phase);
-  strip.render(group_state.look, lit);
+  if (pairing->window_open()) {
+    strip.render(pairing_look(now_ms), true);
+  } else {
+    strip.render(group_state.look, lit);
+  }
   // Short enough that the 50 ms minimum blink period still shows (25 ms on, 25 ms off).
   delay(10);
 }

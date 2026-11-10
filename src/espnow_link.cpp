@@ -1,0 +1,109 @@
+#include "espnow_link.h"
+
+#include <Arduino.h>
+#include <WiFi.h>
+#include <esp_mac.h>
+#include <esp_now.h>
+#include <esp_wifi.h>
+
+#include <cstring>
+
+#include "config.h"
+
+namespace {
+
+constexpr size_t kRingSlots = 8;
+constexpr sls::Mac kBroadcast = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+struct Frame {
+  uint8_t data[sls::kMaxMessageBytes];
+  uint8_t length;
+};
+
+// Single producer (Wi-Fi task) and single consumer (loop); a full ring drops new frames.
+Frame ring[kRingSlots];
+volatile uint8_t ring_head = 0;
+volatile uint8_t ring_tail = 0;
+
+void on_receive(const esp_now_recv_info_t*, const uint8_t* data, int length) {
+  if (length <= 0 || length > static_cast<int>(sls::kMaxMessageBytes)) return;
+  const uint8_t next = (ring_head + 1) % kRingSlots;
+  if (next == ring_tail) return;
+  std::memcpy(ring[ring_head].data, data, length);
+  ring[ring_head].length = static_cast<uint8_t>(length);
+  ring_head = next;
+}
+
+}  // namespace
+
+void EspNowLink::begin() {
+  WiFi.mode(WIFI_STA);
+  esp_wifi_set_channel(ESPNOW_PAIRING_CHANNEL, WIFI_SECOND_CHAN_NONE);
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("ESP-NOW init failed");
+    return;
+  }
+  esp_now_peer_info_t broadcast = {};
+  std::memcpy(broadcast.peer_addr, kBroadcast.data(), kBroadcast.size());
+  broadcast.channel = 0;
+  broadcast.ifidx = WIFI_IF_STA;
+  broadcast.encrypt = false;
+  esp_now_add_peer(&broadcast);
+  esp_now_register_recv_cb(on_receive);
+}
+
+bool EspNowLink::add_peer(const sls::Mac& mac, bool encrypted) {
+  esp_now_peer_info_t peer = {};
+  std::memcpy(peer.peer_addr, mac.data(), mac.size());
+  peer.channel = 0;
+  peer.ifidx = WIFI_IF_STA;
+  peer.encrypt = encrypted;
+  if (encrypted) std::memcpy(peer.lmk, ESPNOW_LMK, ESP_NOW_KEY_LEN);
+  if (esp_now_add_peer(&peer) != ESP_OK) return false;
+  peers_.push_back(mac);
+  return true;
+}
+
+void EspNowLink::remove_known_peers() {
+  for (const sls::Mac& mac : peers_) esp_now_del_peer(mac.data());
+  peers_.clear();
+}
+
+void EspNowLink::set_members(const std::vector<sls::Mac>& members, const sls::Mac& self) {
+  remove_known_peers();
+  for (const sls::Mac& mac : members) {
+    if (mac != self) add_peer(mac, true);
+  }
+}
+
+void EspNowLink::send(const sls::Mac& to, const sls::Message& message) {
+  uint8_t buffer[sls::kMaxMessageBytes];
+  const size_t length = sls::encode(message, buffer, sizeof(buffer));
+  if (length == 0) return;
+  esp_now_send(to.data(), buffer, length);
+}
+
+void EspNowLink::send_hello(uint32_t group_id, const sls::Mac& self) {
+  send(kBroadcast, sls::Message{sls::MessageType::PairingHello, group_id, self, {}});
+}
+
+void EspNowLink::send_ack(const sls::Mac& to, uint32_t group_id, const sls::Mac& self) {
+  if (!esp_now_is_peer_exist(to.data())) add_peer(to, false);
+  send(to, sls::Message{sls::MessageType::PairingAck, group_id, self, {}});
+}
+
+bool EspNowLink::poll(sls::Message& out, uint32_t my_group_id) {
+  if (ring_tail == ring_head) return false;
+  const Frame& frame = ring[ring_tail];
+  const sls::Decoded decoded = sls::decode(frame.data, frame.length, my_group_id);
+  ring_tail = (ring_tail + 1) % kRingSlots;
+  if (!decoded.ok) return false;
+  out = decoded.message;
+  return true;
+}
+
+sls::Mac EspNowLink::self_mac() const {
+  sls::Mac mac = {};
+  esp_read_mac(mac.data(), ESP_MAC_WIFI_STA);
+  return mac;
+}
