@@ -9,6 +9,9 @@ namespace {
 constexpr uint8_t kMinBlinkSpeedPct = 1;
 constexpr uint8_t kMaxBlinkSpeedPct = 100;
 constexpr uint8_t kFullSaturation = 255;
+// Matter's color temperature range: ~6500 K (coolest) to 2000 K (warmest).
+constexpr uint16_t kMinColorTempMireds = 153;
+constexpr uint16_t kMaxColorTempMireds = 500;
 
 uint8_t clamp_open_level(uint8_t pct) {
   if (pct < kMinOpenLevelPct) return kMinOpenLevelPct;
@@ -23,6 +26,12 @@ Command of_kind(Command::Kind kind) {
 }
 
 }  // namespace
+
+uint16_t clamp_color_temp(uint16_t mireds) {
+  if (mireds < kMinColorTempMireds) return kMinColorTempMireds;
+  if (mireds > kMaxColorTempMireds) return kMaxColorTempMireds;
+  return mireds;
+}
 
 uint8_t clamp_blink_speed(uint8_t pct) {
   if (pct < kMinBlinkSpeedPct) return kMinBlinkSpeedPct;
@@ -58,6 +67,11 @@ Command Command::random_color(uint32_t random_value) {
   command.random_value = random_value;
   return command;
 }
+Command Command::set_color_temp(uint16_t mireds) {
+  Command command = of_kind(Kind::SetColorTemp);
+  command.color_temp_mireds = mireds;
+  return command;
+}
 
 GroupState default_group_state() {
   GroupState state{};
@@ -88,6 +102,11 @@ GroupState apply(GroupState state, const Command& command) {
       state.look.color_mode = ColorMode::HueSat;
       state.look.hue_deg = command.hue_deg % kHueDegrees;
       state.look.saturation = command.saturation;
+      state.open = true;
+      break;
+    case Command::Kind::SetColorTemp:
+      state.look.color_mode = ColorMode::ColorTemp;
+      state.look.color_temp_mireds = clamp_color_temp(command.color_temp_mireds);
       state.open = true;
       break;
     case Command::Kind::SetBlink:
