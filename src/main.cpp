@@ -1,5 +1,6 @@
 #include <Arduino.h>
 
+#include "blink.h"
 #include "config.h"
 #include "group_state.h"
 #include "save_scheduler.h"
@@ -11,6 +12,7 @@ namespace {
 StripOutput strip(LED_COUNT, LED_DATA_PIN, LED_PIXEL_TYPE);
 sls::GroupState group_state = sls::default_group_state();
 sls::SaveScheduler scheduler(group_state, PERSIST_SETTLE_MS);
+sls::BlinkClock blink_clock;
 
 }  // namespace
 
@@ -26,6 +28,9 @@ void loop() {
   if (scheduler.due(millis())) {
     save_group_state(group_state);
   }
-  strip.render(group_state);
-  delay(50);
+  const uint32_t phase = blink_clock.phase_ms(millis(), sls::blink_period_ms(group_state.look.blink_speed_pct));
+  const bool lit = sls::blink_lit(group_state.look, group_state.open, phase);
+  strip.render(group_state.look, lit);
+  // Short enough that the 50 ms minimum blink period still shows (25 ms on, 25 ms off).
+  delay(10);
 }

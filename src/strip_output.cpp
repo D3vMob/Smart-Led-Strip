@@ -31,9 +31,9 @@ void StripOutput::begin() {
   pixels_.show();
 }
 
-void StripOutput::render(const sls::GroupState& state) {
-  if (state.open) {
-    pixels_.fill(look_color(pixels_, state.look));
+void StripOutput::render(const sls::Look& look, bool lit) {
+  if (lit) {
+    pixels_.fill(look_color(pixels_, look));
   } else {
     pixels_.clear();
   }
