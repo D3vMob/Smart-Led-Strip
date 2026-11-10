@@ -70,17 +70,13 @@ void put_state_body(uint8_t* b, const StateSync& sync) {
   b[19] = sync.wifi_channel;
 }
 
-// Same ranges the Group state reducer keeps a Look within.
-constexpr uint16_t kHueDegrees = 360;
-constexpr uint8_t kMinBrightnessPct = 10;
-constexpr uint8_t kMaxPct = 100;
-
-// Body bytes of a State/Heartbeat message hold values the receiver can safely apply.
+// Body bytes of a State/Heartbeat message hold values the receiver can safely apply:
+// the same ranges the Group state reducer keeps a Look within.
 bool look_is_valid(const uint8_t* b) {
   if (b[0] > static_cast<uint8_t>(ColorMode::ColorTemp)) return false;
   if (get16(b + 1) >= kHueDegrees) return false;
-  if (b[6] < kMinBrightnessPct || b[6] > kMaxPct) return false;
-  if (b[8] > kMaxPct) return false;
+  if (b[6] < kMinOpenLevelPct || b[6] > kMaxLevelPct) return false;
+  if (b[8] > kMaxLevelPct) return false;
   return true;
 }
 

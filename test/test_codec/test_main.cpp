@@ -279,11 +279,15 @@ static size_t encode_sample_state(uint8_t* buf) {
   return n;
 }
 
-static sls::DecodeError decode_error_after_corrupting(size_t index, uint8_t value) {
+static sls::Decoded decode_sample_state_with_byte(size_t index, uint8_t value) {
   uint8_t buf[sls::kMaxMessageBytes];
   size_t n = encode_sample_state(buf);
   buf[index] = value;
-  sls::Decoded decoded = sls::decode(buf, n, 0x12345678);
+  return sls::decode(buf, n, 0x12345678);
+}
+
+static sls::DecodeError decode_error_after_corrupting(size_t index, uint8_t value) {
+  sls::Decoded decoded = decode_sample_state_with_byte(index, value);
   TEST_ASSERT_FALSE(decoded.ok);
   return decoded.error;
 }
@@ -331,13 +335,6 @@ void test_hue_of_360_or_more_is_rejected_as_bad_value() {
 
 void test_hue_of_359_is_accepted() {
   TEST_ASSERT_TRUE(decode_sample_state_with_hue(359).ok);
-}
-
-static sls::Decoded decode_sample_state_with_byte(size_t index, uint8_t value) {
-  uint8_t buf[sls::kMaxMessageBytes];
-  size_t n = encode_sample_state(buf);
-  buf[index] = value;
-  return sls::decode(buf, n, 0x12345678);
 }
 
 void test_brightness_outside_10_to_100_percent_is_rejected_as_bad_value() {

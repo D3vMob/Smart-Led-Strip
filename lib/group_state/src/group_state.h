@@ -3,6 +3,11 @@
 
 namespace sls {
 
+// Below this level the Strip would look off while Open, so dimming never goes lower.
+constexpr uint8_t kMinOpenLevelPct = 10;
+constexpr uint8_t kMaxLevelPct = 100;
+constexpr uint16_t kHueDegrees = 360;
+
 enum class ColorMode : uint8_t { HueSat, ColorTemp };
 
 struct Look {

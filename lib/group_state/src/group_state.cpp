@@ -4,11 +4,6 @@ namespace sls {
 
 namespace {
 
-// Below this level the Strip would look off while Open, so dimming never goes lower.
-constexpr uint8_t kMinOpenLevelPct = 10;
-constexpr uint8_t kMaxLevelPct = 100;
-constexpr uint16_t kHueDegrees = 360;
-
 uint8_t clamp_open_level(uint8_t pct) {
   if (pct < kMinOpenLevelPct) return kMinOpenLevelPct;
   if (pct > kMaxLevelPct) return kMaxLevelPct;
