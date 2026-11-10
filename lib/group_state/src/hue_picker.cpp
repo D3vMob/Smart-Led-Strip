@@ -4,7 +4,6 @@ namespace sls {
 
 namespace {
 
-constexpr uint16_t kHueDegrees = 360;
 constexpr uint16_t kMinHueShiftDegrees = 30;
 // Hues at circular distance >= 30 from the current one form one arc of this many values.
 constexpr uint32_t kAllowedHueCount = kHueDegrees - 2 * kMinHueShiftDegrees + 1;

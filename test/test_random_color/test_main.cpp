@@ -62,7 +62,7 @@ void test_random_color_opens_a_closed_strip_and_keeps_brightness() {
 void test_random_color_from_color_temp_look_uses_random_value_as_hue() {
   sls::GroupState before = sls::default_group_state();
   before.look.color_mode = sls::ColorMode::ColorTemp;
-  before.look.hue_deg = 100;
+  before.look.hue_deg = 250;
   before.open = true;
 
   sls::GroupState after = sls::apply(before, sls::Command::random_color(460));
