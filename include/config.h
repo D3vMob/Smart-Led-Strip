@@ -11,6 +11,8 @@
 // LD2410C presence sensor (UART)
 #define LD2410_RX_PIN 17  // XIAO ESP32-C6 D7 (GPIO17), wired to the sensor's TX
 #define LD2410_TX_PIN 16  // XIAO ESP32-C6 D6 (GPIO16), wired to the sensor's RX
+// How long boot waits for any LD2410C frame before deciding there is no sensor
+#define LD2410_DETECT_TIMEOUT_MS 1000UL
 
 // Current budget for the strip, in milliamps
 #define MAX_MILLIAMPS 2000
