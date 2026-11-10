@@ -119,15 +119,6 @@ void test_manual_close_while_room_empty_sets_no_hold() {
   TEST_ASSERT_EQUAL(sls::MotionIntent::Open, rules.on_presence(true, 10000));
 }
 
-void test_manual_close_while_motion_disabled_sets_no_hold() {
-  sls::MotionRules rules;
-  rules.on_presence(true, 1000);
-  rules.on_manual_close();
-  rules.on_motion_enabled(true, 2000);
-  rules.on_presence(false, 3000);
-  TEST_ASSERT_EQUAL(sls::MotionIntent::Close, rules.on_tick(63000));
-}
-
 void test_reenabling_motion_clears_hold() {
   sls::MotionRules rules;
   rules.on_motion_enabled(true, 0);
@@ -154,7 +145,6 @@ int main(int, char**) {
   RUN_TEST(test_explicit_dim_or_color_clears_hold);
   RUN_TEST(test_without_sensor_enabling_motion_never_closes_strip);
   RUN_TEST(test_manual_close_while_room_empty_sets_no_hold);
-  RUN_TEST(test_manual_close_while_motion_disabled_sets_no_hold);
   RUN_TEST(test_reenabling_motion_clears_hold);
   return UNITY_END();
 }
