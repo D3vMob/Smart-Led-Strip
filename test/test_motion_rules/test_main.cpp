@@ -130,6 +130,32 @@ void test_reenabling_motion_clears_hold() {
   TEST_ASSERT_EQUAL(sls::MotionIntent::Close, rules.on_tick(64000));
 }
 
+void test_repeated_absent_reports_do_not_restart_absence_count() {
+  sls::MotionRules rules;
+  rules.on_motion_enabled(true, 0);
+  rules.on_presence(true, 1000);
+  for (uint32_t t = 2000; t < 62000; t += 1000) {
+    rules.on_presence(false, t);
+    TEST_ASSERT_EQUAL(sls::MotionIntent::None, rules.on_tick(t));
+  }
+  rules.on_presence(false, 62000);
+  TEST_ASSERT_EQUAL(sls::MotionIntent::Close, rules.on_tick(62000));
+}
+
+void test_repeated_absent_reports_after_close_do_not_close_again() {
+  sls::MotionRules rules;
+  rules.on_motion_enabled(true, 0);
+  rules.on_presence(true, 1000);
+  for (uint32_t t = 2000; t <= 62000; t += 1000) {
+    rules.on_presence(false, t);
+    rules.on_tick(t);
+  }
+  for (uint32_t t = 63000; t <= 150000; t += 1000) {
+    rules.on_presence(false, t);
+    TEST_ASSERT_EQUAL(sls::MotionIntent::None, rules.on_tick(t));
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_presence_opens_strip_while_motion_enabled);
@@ -146,5 +172,7 @@ int main(int, char**) {
   RUN_TEST(test_without_sensor_enabling_motion_never_closes_strip);
   RUN_TEST(test_manual_close_while_room_empty_sets_no_hold);
   RUN_TEST(test_reenabling_motion_clears_hold);
+  RUN_TEST(test_repeated_absent_reports_do_not_restart_absence_count);
+  RUN_TEST(test_repeated_absent_reports_after_close_do_not_close_again);
   return UNITY_END();
 }

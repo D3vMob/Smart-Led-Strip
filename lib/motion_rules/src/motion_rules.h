@@ -13,7 +13,10 @@ enum class MotionIntent : uint8_t { None, Open, Close };
 //
 // A manual close while someone is present holds the Strip Closed until the
 // room has been empty for the absence timeout; an explicit dim/color, or
-// toggling Motion, clears the hold.
+// enabling Motion (which opens the Strip), clears the hold.
+//
+// Presence is a level the sensor reports repeatedly: the absence timeout
+// counts from the first absent report, and repeats do not restart it.
 class MotionRules {
  public:
   explicit MotionRules(uint32_t absence_ms = MOTION_ABSENCE_MS);
