@@ -1,0 +1,5 @@
+{
+  "name": "button_gesture",
+  "version": "0.1.0",
+  "build": { "flags": "-std=gnu++17" }
+}
