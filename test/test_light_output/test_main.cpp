@@ -112,6 +112,16 @@ void test_last_color_command_wins() {
   TEST_ASSERT_EQUAL_UINT16(400, state.look.color_temp_mireds);
 }
 
+void test_set_color_temp_clamps_to_the_matter_range() {
+  sls::GroupState state = sls::default_group_state();
+  TEST_ASSERT_EQUAL_UINT16(153, sls::apply(state, sls::Command::set_color_temp(0)).look.color_temp_mireds);
+  TEST_ASSERT_EQUAL_UINT16(153, sls::apply(state, sls::Command::set_color_temp(152)).look.color_temp_mireds);
+  TEST_ASSERT_EQUAL_UINT16(153, sls::apply(state, sls::Command::set_color_temp(153)).look.color_temp_mireds);
+  TEST_ASSERT_EQUAL_UINT16(500, sls::apply(state, sls::Command::set_color_temp(500)).look.color_temp_mireds);
+  TEST_ASSERT_EQUAL_UINT16(500, sls::apply(state, sls::Command::set_color_temp(501)).look.color_temp_mireds);
+  TEST_ASSERT_EQUAL_UINT16(500, sls::apply(state, sls::Command::set_color_temp(1000)).look.color_temp_mireds);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_brightness_scales_channels_linearly_and_keeps_minimum_visible);
@@ -123,5 +133,6 @@ int main() {
   RUN_TEST(test_power_cap_leaves_frame_untouched_when_under_budget);
   RUN_TEST(test_set_color_temp_switches_to_color_temp_and_keeps_the_rest_of_the_look);
   RUN_TEST(test_last_color_command_wins);
+  RUN_TEST(test_set_color_temp_clamps_to_the_matter_range);
   return UNITY_END();
 }

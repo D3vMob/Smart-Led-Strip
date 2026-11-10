@@ -8,11 +8,20 @@ namespace {
 constexpr uint8_t kMinOpenLevelPct = 10;
 constexpr uint8_t kMaxLevelPct = 100;
 constexpr uint16_t kHueDegrees = 360;
+// Matter's color temperature range: ~6500 K (coolest) to 2000 K (warmest).
+constexpr uint16_t kMinColorTempMireds = 153;
+constexpr uint16_t kMaxColorTempMireds = 500;
 
 uint8_t clamp_open_level(uint8_t pct) {
   if (pct < kMinOpenLevelPct) return kMinOpenLevelPct;
   if (pct > kMaxLevelPct) return kMaxLevelPct;
   return pct;
+}
+
+uint16_t clamp_color_temp(uint16_t mireds) {
+  if (mireds < kMinColorTempMireds) return kMinColorTempMireds;
+  if (mireds > kMaxColorTempMireds) return kMaxColorTempMireds;
+  return mireds;
 }
 
 }  // namespace
@@ -60,7 +69,7 @@ GroupState apply(GroupState state, const Command& command) {
       break;
     case Command::Kind::SetColorTemp:
       state.look.color_mode = ColorMode::ColorTemp;
-      state.look.color_temp_mireds = command.color_temp_mireds;
+      state.look.color_temp_mireds = clamp_color_temp(command.color_temp_mireds);
       state.open = true;
       break;
   }
