@@ -49,6 +49,10 @@ class GroupSync {
   // Hearing any of them turns an Undecided Unit into a Member; a Coordinator keeps its role.
   void on_message(const Message& message, uint32_t now_ms);
 
+  // Matter commissioning is scanning for or joining the router; the radio must
+  // not move meanwhile, so listen_channel returns 0 until it stops.
+  void on_commissioning(bool in_progress);
+
   SyncRole role() const;
   bool matter_enabled() const;  // false once Member
   const GroupState& state() const;
@@ -82,6 +86,7 @@ class GroupSync {
   bool heard_any_ = false;
   uint32_t last_seq_ = 0;
   uint32_t last_heard_ms_ = 0;
+  bool commissioning_ = false;
 };
 
 }  // namespace sls

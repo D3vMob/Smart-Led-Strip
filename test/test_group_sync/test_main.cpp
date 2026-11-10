@@ -434,6 +434,21 @@ void test_a_unit_alone_in_its_group_never_hunts() {
   TEST_ASSERT_EQUAL(0, alone.listen_channel(100000));
 }
 
+void test_an_undecided_unit_being_commissioned_never_moves_the_radio() {
+  std::vector<sls::GroupSync> units = make_units(sls::SyncRole::Undecided);
+  units[2].on_commissioning(true);
+  for (uint32_t now_ms = 6000; now_ms <= 6000 + 14 * 2500; now_ms += 2500) {
+    TEST_ASSERT_EQUAL(0, units[2].listen_channel(now_ms));
+  }
+}
+
+void test_an_undecided_unit_hunts_again_once_commissioning_stops() {
+  std::vector<sls::GroupSync> units = make_units(sls::SyncRole::Undecided);
+  units[2].on_commissioning(true);
+  units[2].on_commissioning(false);
+  TEST_ASSERT_EQUAL(1, units[2].listen_channel(6000));
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_a_member_that_hears_nothing_hunts_across_the_channels_after_six_seconds);
@@ -466,5 +481,7 @@ int main() {
   RUN_TEST(test_an_undecided_unit_in_a_group_hunts_like_a_member);
   RUN_TEST(test_a_coordinator_never_hunts);
   RUN_TEST(test_a_unit_alone_in_its_group_never_hunts);
+  RUN_TEST(test_an_undecided_unit_being_commissioned_never_moves_the_radio);
+  RUN_TEST(test_an_undecided_unit_hunts_again_once_commissioning_stops);
   return UNITY_END();
 }

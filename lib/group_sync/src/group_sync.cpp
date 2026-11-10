@@ -93,8 +93,9 @@ uint32_t GroupSync::blink_phase_ms(uint32_t now_ms) const {
   return blink_clock_.phase_ms(now_ms, blink_period_ms(state_.look.blink_speed_pct));
 }
 uint32_t GroupSync::last_heard_ms() const { return last_heard_ms_; }
+void GroupSync::on_commissioning(bool in_progress) { commissioning_ = in_progress; }
 uint8_t GroupSync::listen_channel(uint32_t now_ms) const {
-  if (role_ == SyncRole::Coordinator || members_.size() <= 1) return 0;
+  if (commissioning_ || role_ == SyncRole::Coordinator || members_.size() <= 1) return 0;
   const uint32_t quiet = now_ms - last_heard_ms_;
   if (quiet < kChannelHuntQuietMs) return 0;
   const uint32_t hunting = quiet - kChannelHuntQuietMs;

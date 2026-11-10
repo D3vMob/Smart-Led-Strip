@@ -151,7 +151,9 @@ void loop() {
   }
   apply_pairing_actions(pairing->on_tick(now_ms), now_ms);
   // A Unit joined to a router stays on its channel. Otherwise pair on the
-  // pairing channel, or hunt for a Coordinator that moved to its router's channel.
+  // pairing channel, or hunt for a Coordinator that moved to its router's channel,
+  // except while Matter commissioning is scanning for or joining the router.
+  group_sync->on_commissioning(matter_started && matter_endpoints::commissioning());
   if (!WiFi.isConnected()) {
     const uint8_t channel = pairing->window_open() ? ESPNOW_PAIRING_CHANNEL : group_sync->listen_channel(now_ms);
     if (channel != 0) espnow.set_channel(channel);
