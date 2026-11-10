@@ -12,6 +12,8 @@
 
 namespace {
 
+static_assert(sizeof(ESPNOW_LMK) - 1 == ESP_NOW_KEY_LEN, "ESPNOW_LMK must be exactly 16 characters");
+
 constexpr size_t kRingSlots = 8;
 constexpr sls::Mac kBroadcast = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
@@ -93,13 +95,17 @@ void EspNowLink::send_ack(const sls::Mac& to, uint32_t group_id, const sls::Mac&
 }
 
 bool EspNowLink::poll(sls::Message& out, uint32_t my_group_id) {
-  if (ring_tail == ring_head) return false;
-  const Frame& frame = ring[ring_tail];
-  const sls::Decoded decoded = sls::decode(frame.data, frame.length, my_group_id);
-  ring_tail = (ring_tail + 1) % kRingSlots;
-  if (!decoded.ok) return false;
-  out = decoded.message;
-  return true;
+  // Skips frames that don't decode (e.g. another Group's) so they never stall the ones behind.
+  while (ring_tail != ring_head) {
+    const Frame& frame = ring[ring_tail];
+    const sls::Decoded decoded = sls::decode(frame.data, frame.length, my_group_id);
+    ring_tail = (ring_tail + 1) % kRingSlots;
+    if (decoded.ok) {
+      out = decoded.message;
+      return true;
+    }
+  }
+  return false;
 }
 
 sls::Mac EspNowLink::self_mac() const {

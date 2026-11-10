@@ -13,7 +13,7 @@ class EspNowLink {
   void set_members(const std::vector<sls::Mac>& members, const sls::Mac& self);
   void send_hello(uint32_t group_id, const sls::Mac& self);
   void send_ack(const sls::Mac& to, uint32_t group_id, const sls::Mac& self);
-  // Pops one received frame; true only when it decodes cleanly.
+  // Pops received frames until one decodes cleanly; false once the queue is empty.
   bool poll(sls::Message& out, uint32_t my_group_id);
   sls::Mac self_mac() const;
 
