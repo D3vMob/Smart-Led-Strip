@@ -330,6 +330,25 @@ void test_ninth_unit_pressed_after_the_first_window_closed_is_refused() {
   ninth_unit_checks(presses, macs, 8);
 }
 
+void test_two_extra_units_stay_out_of_the_group_and_pair_with_each_other() {
+  std::vector<sls::Mac> macs;
+  for (uint8_t i = 0; i < 10; ++i) macs.push_back({0x02, 0, 0, 0, 0, uint8_t(0x20 + i)});
+  std::vector<uint32_t> presses;
+  for (uint32_t i = 0; i < 10; ++i) presses.push_back(1000 + i * 1000);
+  Radio radio(macs);
+  radio.run(presses, 80000);
+
+  for (size_t i = 0; i < 8; ++i) {
+    TEST_ASSERT_EQUAL_UINT(8, radio.units[i].members().size());
+    TEST_ASSERT_TRUE(radio.units[0].members() == radio.units[i].members());
+    TEST_ASSERT_EQUAL_HEX32(radio.units[0].group_id(), radio.units[i].group_id());
+  }
+  const std::vector<sls::Mac> extras = {macs[8], macs[9]};
+  TEST_ASSERT_TRUE(extras == radio.units[8].members());
+  TEST_ASSERT_TRUE(extras == radio.units[9].members());
+  TEST_ASSERT_NOT_EQUAL(radio.units[0].group_id(), radio.units[8].group_id());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_long_press_opens_the_window_and_broadcasts_a_hello_right_away);
@@ -357,5 +376,6 @@ int main(int, char**) {
   RUN_TEST(test_nine_units_pressed_at_once_refuse_the_highest_mac);
   RUN_TEST(test_nine_units_pressed_one_after_another_refuse_the_last_pressed);
   RUN_TEST(test_ninth_unit_pressed_after_the_first_window_closed_is_refused);
+  RUN_TEST(test_two_extra_units_stay_out_of_the_group_and_pair_with_each_other);
   return UNITY_END();
 }
