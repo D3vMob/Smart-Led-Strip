@@ -150,6 +150,12 @@ void loop() {
     }
   }
   apply_pairing_actions(pairing->on_tick(now_ms), now_ms);
+  // A Unit joined to a router stays on its channel. Otherwise pair on the
+  // pairing channel, or hunt for a Coordinator that moved to its router's channel.
+  if (!WiFi.isConnected()) {
+    const uint8_t channel = pairing->window_open() ? ESPNOW_PAIRING_CHANNEL : group_sync->listen_channel(now_ms);
+    if (channel != 0) espnow.set_channel(channel);
+  }
   // Apply voice writes, then report back the real state, including clamped
   // values and changes made here (motion, boot restore).
   if (group_sync->matter_enabled()) {
