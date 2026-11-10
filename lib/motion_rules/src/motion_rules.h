@@ -15,6 +15,9 @@ enum class MotionIntent : uint8_t { None, Open, Close };
 // room has been empty for the absence timeout; an explicit dim/color, or
 // enabling Motion (which opens the Strip), clears the hold.
 //
+// Open is reported once per arrival (the transition into presence), not on
+// every present report.
+//
 // Presence is a level the sensor reports repeatedly: the absence timeout
 // counts from the first absent report, and repeats do not restart it.
 class MotionRules {
@@ -33,6 +36,9 @@ class MotionRules {
   // Unknown until the first absence is reported, so a Unit without a sensor
   // never closes the Strip on its own.
   bool room_empty_ = false;
+  // Last reported presence; false until the first present report, so that
+  // report counts as an arrival.
+  bool was_present_ = false;
   bool absence_pending_ = false;
   bool hold_ = false;
   uint32_t absent_since_ms_ = 0;

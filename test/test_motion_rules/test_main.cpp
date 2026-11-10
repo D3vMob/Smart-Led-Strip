@@ -156,6 +156,15 @@ void test_repeated_absent_reports_after_close_do_not_close_again() {
   }
 }
 
+void test_repeated_present_reports_do_not_open_again() {
+  sls::MotionRules rules;
+  rules.on_motion_enabled(true, 0);
+  TEST_ASSERT_EQUAL(sls::MotionIntent::Open, rules.on_presence(true, 1000));
+  TEST_ASSERT_EQUAL(sls::MotionIntent::None, rules.on_presence(true, 1100));
+  TEST_ASSERT_EQUAL(sls::MotionIntent::None, rules.on_presence(true, 1200));
+  TEST_ASSERT_EQUAL(sls::MotionIntent::None, rules.on_presence(true, 1300));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_presence_opens_strip_while_motion_enabled);
@@ -174,5 +183,6 @@ int main(int, char**) {
   RUN_TEST(test_reenabling_motion_clears_hold);
   RUN_TEST(test_repeated_absent_reports_do_not_restart_absence_count);
   RUN_TEST(test_repeated_absent_reports_after_close_do_not_close_again);
+  RUN_TEST(test_repeated_present_reports_do_not_open_again);
   return UNITY_END();
 }

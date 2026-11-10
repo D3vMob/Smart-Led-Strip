@@ -14,6 +14,8 @@ void MotionRules::on_motion_enabled(bool on, uint32_t now_ms) {
 MotionIntent MotionRules::on_presence(bool present, uint32_t now_ms) {
   const bool newly_absent = !present && !room_empty_;
   room_empty_ = !present;
+  const bool arrived = present && !was_present_;
+  was_present_ = present;
   if (motion_enabled_) {
     if (present) {
       absence_pending_ = false;
@@ -22,7 +24,7 @@ MotionIntent MotionRules::on_presence(bool present, uint32_t now_ms) {
       absent_since_ms_ = now_ms;
     }
   }
-  if (present && motion_enabled_ && !hold_) return MotionIntent::Open;
+  if (arrived && motion_enabled_ && !hold_) return MotionIntent::Open;
   return MotionIntent::None;
 }
 
