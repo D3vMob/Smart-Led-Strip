@@ -33,12 +33,11 @@ class MotionRules {
  private:
   uint32_t absence_ms_;
   bool motion_enabled_ = false;
-  // Unknown until the first absence is reported, so a Unit without a sensor
-  // never closes the Strip on its own.
-  bool room_empty_ = false;
-  // Last reported presence; false until the first present report, so that
-  // report counts as an arrival.
-  bool was_present_ = false;
+  // Last reported presence. Unknown until the first report: a Unit without a
+  // sensor never closes the Strip on its own, and the first present report
+  // counts as an arrival.
+  enum class Presence : uint8_t { Unknown, Present, Absent };
+  Presence presence_ = Presence::Unknown;
   bool absence_pending_ = false;
   bool hold_ = false;
   uint32_t absent_since_ms_ = 0;

@@ -7,15 +7,14 @@ MotionRules::MotionRules(uint32_t absence_ms) : absence_ms_(absence_ms) {}
 void MotionRules::on_motion_enabled(bool on, uint32_t now_ms) {
   motion_enabled_ = on;
   if (on) hold_ = false;  // enabling opens the Strip: an explicit open
-  absence_pending_ = on && room_empty_;
+  absence_pending_ = on && presence_ == Presence::Absent;
   if (absence_pending_) absent_since_ms_ = now_ms;
 }
 
 MotionIntent MotionRules::on_presence(bool present, uint32_t now_ms) {
-  const bool newly_absent = !present && !room_empty_;
-  room_empty_ = !present;
-  const bool arrived = present && !was_present_;
-  was_present_ = present;
+  const bool arrived = present && presence_ != Presence::Present;
+  const bool newly_absent = !present && presence_ != Presence::Absent;
+  presence_ = present ? Presence::Present : Presence::Absent;
   if (motion_enabled_) {
     if (present) {
       absence_pending_ = false;
@@ -41,7 +40,7 @@ MotionIntent MotionRules::on_tick(uint32_t now_ms) {
   return MotionIntent::None;
 }
 
-void MotionRules::on_manual_close() { hold_ = motion_enabled_ && !room_empty_; }
+void MotionRules::on_manual_close() { hold_ = motion_enabled_ && presence_ != Presence::Absent; }
 
 void MotionRules::on_explicit_open() { hold_ = false; }
 
