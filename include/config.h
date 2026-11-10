@@ -1,7 +1,7 @@
 #pragma once
 // Compile-time hardware configuration shared by every Unit's build.
-
-#include <Adafruit_NeoPixel.h>
+// Header-free so native tests can include it; LED_PIXEL_TYPE expands where
+// <Adafruit_NeoPixel.h> is already included.
 
 // LED strip
 #define LED_COUNT 60

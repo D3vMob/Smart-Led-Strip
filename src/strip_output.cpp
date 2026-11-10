@@ -2,14 +2,22 @@
 
 namespace {
 
+uint8_t scale(uint8_t channel, uint8_t brightness_pct) {
+  return static_cast<uint8_t>(channel * brightness_pct / 100);
+}
+
 uint32_t look_color(Adafruit_NeoPixel& pixels, const sls::Look& look) {
-  const uint8_t value = static_cast<uint8_t>(look.brightness_pct * 255 / 100);
+  uint32_t full;
   if (look.color_mode == sls::ColorMode::ColorTemp) {
     // Color temperature is shown as plain white until whites get their own conversion.
-    return pixels.Color(value, value, value);
+    full = pixels.Color(255, 255, 255);
+  } else {
+    const uint16_t hue16 = static_cast<uint16_t>(static_cast<uint32_t>(look.hue_deg) * 65536UL / 360UL);
+    full = Adafruit_NeoPixel::gamma32(Adafruit_NeoPixel::ColorHSV(hue16, look.saturation, 255));
   }
-  const uint16_t hue16 = static_cast<uint16_t>(static_cast<uint32_t>(look.hue_deg) * 65536UL / 360UL);
-  return Adafruit_NeoPixel::gamma32(Adafruit_NeoPixel::ColorHSV(hue16, look.saturation, value));
+  // Gamma corrects the hue only; brightness scales linearly so the 10% minimum stays visible.
+  return pixels.Color(scale(full >> 16, look.brightness_pct), scale(full >> 8, look.brightness_pct),
+                      scale(full, look.brightness_pct));
 }
 
 }  // namespace
