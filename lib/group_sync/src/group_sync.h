@@ -65,7 +65,8 @@ class GroupSync {
   // a Coordinator that moved to its router's Wi-Fi channel: after
   // kChannelHuntQuietMs without hearing it, step through channels 1 to
   // kChannelHuntLast, kChannelHuntDwellMs each, until a Heartbeat arrives. A
-  // Coordinator, or a Unit alone in its Group, never hunts.
+  // Coordinator, or a Unit alone in its Group, never hunts, and no Unit hunts
+  // while a Matter commissioning session is in progress (on_commissioning).
   uint8_t listen_channel(uint32_t now_ms) const;
 
  private:
