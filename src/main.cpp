@@ -4,6 +4,7 @@
 #include "config.h"
 #include "group_state.h"
 #include "ld2410_uart.h"
+#include "matter_endpoints.h"
 #include "save_scheduler.h"
 #include "state_store.h"
 #include "strip_output.h"
@@ -48,6 +49,7 @@ void setup() {
   // The Strip comes back the way it was left; a fresh Unit starts in the defaults (Closed).
   group_state = load_group_state();
   scheduler = sls::SaveScheduler(group_state, PERSIST_SETTLE_MS);
+  matter_endpoints::begin(group_state);
 }
 
 void loop() {
@@ -55,6 +57,9 @@ void loop() {
   sls::ld2410::Presence presence;
   if (sensor.poll(now_ms, presence)) report_presence(presence);
   report_sensor_status(now_ms);
+  // Apply voice writes, then report back the real state, including clamped
+  // values and changes made here (motion, boot restore).
+  matter_endpoints::sync(group_state);
   scheduler.on_change(group_state, now_ms);
   if (scheduler.due(now_ms)) {
     save_group_state(group_state);
