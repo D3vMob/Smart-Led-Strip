@@ -10,6 +10,7 @@ namespace {
 
 constexpr const char* kNamespace = "group";
 constexpr const char* kKey = "members";
+constexpr const char* kRoleKey = "role";
 constexpr const char* kMotionNamespace = "motion";
 constexpr size_t kMacBytes = sizeof(sls::Mac);
 
@@ -45,6 +46,24 @@ void save_group_members(const std::vector<sls::Mac>& members) {
   Preferences preferences;
   if (preferences.begin(kNamespace, false)) {
     preferences.putBytes(kKey, buffer, length);
+    preferences.end();
+  }
+}
+
+sls::SyncRole load_sync_role() {
+  sls::SyncRole role = sls::SyncRole::Undecided;
+  Preferences preferences;
+  if (!preferences.begin(kNamespace, true)) return role;
+  const uint8_t stored = preferences.getUChar(kRoleKey, static_cast<uint8_t>(sls::SyncRole::Undecided));
+  if (stored <= static_cast<uint8_t>(sls::SyncRole::Member)) role = static_cast<sls::SyncRole>(stored);
+  preferences.end();
+  return role;
+}
+
+void save_sync_role(sls::SyncRole role) {
+  Preferences preferences;
+  if (preferences.begin(kNamespace, false)) {
+    preferences.putUChar(kRoleKey, static_cast<uint8_t>(role));
     preferences.end();
   }
 }

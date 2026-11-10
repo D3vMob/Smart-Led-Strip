@@ -133,4 +133,6 @@ void sync(sls::GroupState& state) {
   random_color.setOnOff(values.random_color.on);
 }
 
+bool commissioned() { return Matter.isDeviceCommissioned(); }
+
 }  // namespace matter_endpoints

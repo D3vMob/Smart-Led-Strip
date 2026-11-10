@@ -14,6 +14,9 @@ namespace matter_endpoints {
 // pairing code on serial (repeated every 5 s by sync() until commissioned).
 void begin(const sls::GroupState& initial);
 
+// Whether the Unit has been commissioned into a Matter fabric.
+bool commissioned();
+
 // Applies the writes received since the last call to the Group state, then
 // reports every endpoint's attributes from it. Call from loop(): Matter
 // callbacks run on another task and only queue their commands. Cheap when

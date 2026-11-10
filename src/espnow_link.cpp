@@ -85,6 +85,18 @@ void EspNowLink::send(const sls::Mac& to, const sls::Message& message) {
   esp_now_send(to.data(), buffer, length);
 }
 
+void EspNowLink::send_all(const std::vector<sls::Outgoing>& outgoing) {
+  for (const sls::Outgoing& item : outgoing) send(item.to, item.message);
+}
+
+void EspNowLink::set_channel(uint8_t channel) {
+  if (channel < 1 || channel > 14) return;
+  uint8_t current = 0;
+  wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
+  if (esp_wifi_get_channel(&current, &second) == ESP_OK && current == channel) return;
+  esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+}
+
 void EspNowLink::send_hello(uint32_t group_id, const sls::Mac& self, const sls::PairingInfo& info) {
   send(kBroadcast, sls::Message{sls::MessageType::PairingHello, group_id, self, info});
 }
