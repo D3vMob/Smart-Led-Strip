@@ -4,6 +4,8 @@ namespace sls {
 
 namespace {
 
+constexpr uint8_t kFullSaturation = 255;
+
 uint8_t clamp_open_level(uint8_t pct) {
   if (pct < kMinOpenLevelPct) return kMinOpenLevelPct;
   if (pct > kMaxLevelPct) return kMaxLevelPct;
@@ -12,11 +14,14 @@ uint8_t clamp_open_level(uint8_t pct) {
 
 }  // namespace
 
-Command Command::open() { return Command{Kind::Open, 0, 0, 0}; }
-Command Command::close() { return Command{Kind::Close, 0, 0, 0}; }
-Command Command::set_level(uint8_t pct) { return Command{Kind::SetLevel, pct, 0, 0}; }
+Command Command::open() { return Command{Kind::Open, 0, 0, 0, 0}; }
+Command Command::close() { return Command{Kind::Close, 0, 0, 0, 0}; }
+Command Command::set_level(uint8_t pct) { return Command{Kind::SetLevel, pct, 0, 0, 0}; }
 Command Command::set_hue_sat(uint16_t hue_deg, uint8_t saturation) {
-  return Command{Kind::SetHueSat, 0, hue_deg, saturation};
+  return Command{Kind::SetHueSat, 0, hue_deg, saturation, 0};
+}
+Command Command::random_color(uint32_t random_value) {
+  return Command{Kind::RandomColor, 0, 0, 0, random_value};
 }
 
 GroupState default_group_state() {
@@ -48,6 +53,15 @@ GroupState apply(GroupState state, const Command& command) {
       state.look.color_mode = ColorMode::HueSat;
       state.look.hue_deg = command.hue_deg % kHueDegrees;
       state.look.saturation = command.saturation;
+      state.open = true;
+      break;
+    case Command::Kind::RandomColor:
+      // A ColorTemp Look has no hue to avoid, so the random value alone picks it.
+      state.look.hue_deg = state.look.color_mode == ColorMode::ColorTemp
+                               ? static_cast<uint16_t>(command.random_value % kHueDegrees)
+                               : pick_hue(state.look.hue_deg, command.random_value);
+      state.look.color_mode = ColorMode::HueSat;
+      state.look.saturation = kFullSaturation;
       state.open = true;
       break;
   }
