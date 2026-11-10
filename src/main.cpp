@@ -6,7 +6,7 @@
 
 namespace {
 
-StripOutput strip(LED_COUNT, LED_DATA_PIN, LED_PIXEL_TYPE);
+StripOutput strip(LED_COUNT, LED_DATA_PIN, LED_PIXEL_TYPE, MAX_MILLIAMPS);
 sls::GroupState group_state = sls::default_group_state();
 
 }  // namespace
