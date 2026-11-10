@@ -123,6 +123,13 @@ void test_decoding_a_blink_speed_above_100_gives_defaults() {
   assert_same_state(sls::default_group_state(), sls::decode_group_state(blob.data(), blob.size()));
 }
 
+void test_decoding_a_blink_speed_of_0_gives_defaults() {
+  sls::GroupStateBlob blob = sls::encode_group_state(non_default_state());
+  blob[9] = 0;
+  resign(blob);
+  assert_same_state(sls::default_group_state(), sls::decode_group_state(blob.data(), blob.size()));
+}
+
 void test_decoding_a_boolean_byte_other_than_0_or_1_gives_defaults() {
   sls::GroupStateBlob blob = sls::encode_group_state(non_default_state());
   blob[10] = 2;
@@ -213,6 +220,7 @@ int main() {
   RUN_TEST(test_decoding_a_brightness_above_100_gives_defaults);
   RUN_TEST(test_decoding_a_brightness_below_10_gives_defaults);
   RUN_TEST(test_decoding_a_blink_speed_above_100_gives_defaults);
+  RUN_TEST(test_decoding_a_blink_speed_of_0_gives_defaults);
   RUN_TEST(test_decoding_a_boolean_byte_other_than_0_or_1_gives_defaults);
   RUN_TEST(test_a_single_change_is_due_once_the_settle_time_has_passed);
   RUN_TEST(test_a_burst_of_changes_is_due_once_after_the_last_one_settles);
