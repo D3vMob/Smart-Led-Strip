@@ -49,6 +49,9 @@ struct Command {
 // Blink speed percentage clamped to 1-100.
 uint8_t clamp_blink_speed(uint8_t pct);
 
+// Color temperature clamped to Matter's range, 153-500 mireds (~6500 K to 2000 K).
+uint16_t clamp_color_temp(uint16_t mireds);
+
 GroupState default_group_state();
 GroupState apply(GroupState state, const Command& command);
 

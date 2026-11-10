@@ -51,9 +51,6 @@ Rgb hsv_to_rgb(uint16_t hue_deg, uint8_t saturation) {
   return Rgb{mix(r), mix(g), mix(b)};
 }
 
-constexpr uint16_t kMinColorTempMireds = 153;
-constexpr uint16_t kMaxColorTempMireds = 500;
-
 uint8_t clamp_channel(double v) {
   if (v < 0.0) return 0;
   if (v > 255.0) return 255;
@@ -62,8 +59,8 @@ uint8_t clamp_channel(double v) {
 
 // Display-space RGB white for a colour temperature (Kelvin approximation).
 Rgb color_temp_to_rgb(uint16_t mireds) {
-  if (mireds < kMinColorTempMireds) mireds = kMinColorTempMireds;
-  if (mireds > kMaxColorTempMireds) mireds = kMaxColorTempMireds;
+  // Looks loaded from storage aren't clamped by the reducer, so clamp here too.
+  mireds = clamp_color_temp(mireds);
   double temp = (1000000.0 / mireds) / 100.0;
   double r = temp <= 66 ? 255.0 : 329.698727446 * std::pow(temp - 60, -0.1332047592);
   double g = temp <= 66 ? 99.4708025861 * std::log(temp) - 161.1195681661

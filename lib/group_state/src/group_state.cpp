@@ -25,13 +25,13 @@ Command of_kind(Command::Kind kind) {
   return command;
 }
 
+}  // namespace
+
 uint16_t clamp_color_temp(uint16_t mireds) {
   if (mireds < kMinColorTempMireds) return kMinColorTempMireds;
   if (mireds > kMaxColorTempMireds) return kMaxColorTempMireds;
   return mireds;
 }
-
-}  // namespace
 
 uint8_t clamp_blink_speed(uint8_t pct) {
   if (pct < kMinBlinkSpeedPct) return kMinBlinkSpeedPct;
