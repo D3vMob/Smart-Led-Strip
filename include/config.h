@@ -17,3 +17,6 @@
 
 // How long the room must be empty before motion closes the Strip
 #define MOTION_ABSENCE_MS 60000UL
+
+// How long the Group state must stay unchanged before it is written to flash
+#define PERSIST_SETTLE_MS 3000UL
