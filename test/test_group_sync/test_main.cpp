@@ -305,7 +305,7 @@ void test_a_member_never_relays_a_local_change() {
   TEST_ASSERT_EQUAL(0, units[1].on_local_change(sls::apply(sls::default_group_state(), sls::Command::open()), 1000).size());
 }
 
-void test_a_member_ignores_messages_from_another_group() {
+void test_a_unit_ignores_messages_from_another_group() {
   std::vector<sls::GroupSync> units = make_units(sls::SyncRole::Undecided);
   const uint32_t other_group = kGroupId + 1;
   sls::GroupState changed = sls::apply(sls::default_group_state(), sls::Command::open());
@@ -373,7 +373,7 @@ int main() {
   RUN_TEST(test_a_persisted_member_is_matter_silent_from_boot);
   RUN_TEST(test_a_persisted_coordinator_sends_heartbeats_without_being_commissioned_again);
   RUN_TEST(test_a_member_never_relays_a_local_change);
-  RUN_TEST(test_a_member_ignores_messages_from_another_group);
+  RUN_TEST(test_a_unit_ignores_messages_from_another_group);
   RUN_TEST(test_a_member_realigns_its_blink_clock_when_drift_exceeds_the_threshold);
   RUN_TEST(test_a_member_leaves_its_blink_clock_alone_when_drift_is_within_the_threshold);
   RUN_TEST(test_blink_drift_is_measured_around_the_period);
