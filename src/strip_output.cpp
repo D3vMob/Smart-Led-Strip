@@ -12,8 +12,8 @@ void StripOutput::begin() {
   pixels_.show();
 }
 
-void StripOutput::render(const sls::GroupState& state) {
-  const sls::Frame frame = sls::render(state.look, state.open, led_count_, max_milliamps_);
+void StripOutput::render(const sls::Look& look, bool lit) {
+  const sls::Frame frame = sls::render(look, lit, led_count_, max_milliamps_);
   pixels_.fill(pixels_.Color(frame.r, frame.g, frame.b));
   pixels_.show();
 }
