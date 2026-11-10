@@ -20,9 +20,7 @@ constexpr size_t kMotionEnabledAt = 11;
 constexpr size_t kChecksumAt = 12;  // uint16, little-endian, over bytes before it
 static_assert(kChecksumAt + 2 == kGroupStateBlobSize, "blob layout and size disagree");
 
-constexpr uint8_t kMinBrightnessPct = 10;
-constexpr uint8_t kMaxPct = 100;
-constexpr uint16_t kHueDegrees = 360;
+constexpr uint8_t kMaxBlinkSpeedPct = 100;
 
 void put_u16(uint8_t* out, uint16_t value) {
   out[0] = static_cast<uint8_t>(value & 0xFF);
@@ -52,8 +50,8 @@ bool is_plausible(const uint8_t* b) {
   const uint8_t brightness = b[kBrightnessAt];
   return b[kColorModeAt] <= static_cast<uint8_t>(ColorMode::ColorTemp) &&
          get_u16(b + kHueAt) < kHueDegrees &&
-         brightness >= kMinBrightnessPct && brightness <= kMaxPct &&
-         b[kBlinkSpeedAt] <= kMaxPct &&
+         brightness >= kMinOpenLevelPct && brightness <= kMaxLevelPct &&
+         b[kBlinkSpeedAt] <= kMaxBlinkSpeedPct &&
          is_flag(b[kBlinkOnAt]) && is_flag(b[kOpenAt]) && is_flag(b[kMotionEnabledAt]);
 }
 
