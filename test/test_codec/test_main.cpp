@@ -132,7 +132,7 @@ static void check_pairing_decodes_for_unpaired_unit(sls::MessageType type) {
   message.type = type;
   message.group_id = 0xA1B2C3D4;
   message.sender = {0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F};
-  message.body = std::monostate{};
+  message.body = sls::PairingInfo{};
 
   uint8_t buf[sls::kMaxMessageBytes];
   size_t n = sls::encode(message, buf, sizeof(buf));
@@ -242,6 +242,10 @@ static sls::Message sample_message(sls::MessageType type) {
       break;
     case sls::MessageType::ChannelMoved:
       message.body = sls::ChannelMoved{6};
+      break;
+    case sls::MessageType::PairingHello:
+    case sls::MessageType::PairingAck:
+      message.body = sls::PairingInfo{1234, {{1, 2, 3, 4, 5, 6}, {7, 8, 9, 10, 11, 12}}};
       break;
     default:
       message.body = std::monostate{};
@@ -425,6 +429,81 @@ void test_sequence_number_after_wrap_around_is_newer() {
   TEST_ASSERT_TRUE(sls::seq_is_newer(0x7FFFFFFF, 0));
 }
 
+static sls::Mac member_mac(uint8_t seed) {
+  return {seed, static_cast<uint8_t>(seed + 1), static_cast<uint8_t>(seed + 2),
+          static_cast<uint8_t>(seed + 3), static_cast<uint8_t>(seed + 4),
+          static_cast<uint8_t>(seed + 5)};
+}
+
+static void check_pairing_info_round_trips(sls::MessageType type, uint32_t age_ms, size_t count) {
+  sls::PairingInfo info{age_ms, {}};
+  for (size_t i = 0; i < count; ++i) info.members.push_back(member_mac(static_cast<uint8_t>(16 * i)));
+  sls::Message message = sample_message(type);
+  message.body = info;
+
+  uint8_t buf[sls::kMaxMessageBytes];
+  size_t n = sls::encode(message, buf, sizeof(buf));
+  TEST_ASSERT_GREATER_THAN(0, n);
+
+  sls::Decoded decoded = sls::decode(buf, n, 0);
+  TEST_ASSERT_TRUE(decoded.ok);
+  const sls::PairingInfo* got = std::get_if<sls::PairingInfo>(&decoded.message.body);
+  TEST_ASSERT_NOT_NULL(got);
+  TEST_ASSERT_EQUAL_UINT32(age_ms, got->window_age_ms);
+  TEST_ASSERT_TRUE(info.members == got->members);
+}
+
+void test_pairing_hello_and_ack_round_trip_window_age_and_member_table() {
+  check_pairing_info_round_trips(sls::MessageType::PairingHello, 0xA1B2C3D4, sls::kMaxGroupMembers);
+  check_pairing_info_round_trips(sls::MessageType::PairingAck, 29999, sls::kMaxGroupMembers);
+  check_pairing_info_round_trips(sls::MessageType::PairingHello, 0, 0);
+  check_pairing_info_round_trips(sls::MessageType::PairingAck, 5, 1);
+}
+
+void test_pairing_frame_claiming_more_than_8_members_is_rejected_as_bad_value() {
+  uint8_t buf[sls::kMaxMessageBytes] = {};
+  size_t n = sls::encode(sample_message(sls::MessageType::PairingHello), buf, sizeof(buf));
+  TEST_ASSERT_GREATER_THAN(0, n);
+  const size_t kCountOffset = 14 + 4;
+  buf[kCountOffset] = 9;
+  size_t len = 14 + 5 + 6 * 9;
+  sls::Decoded decoded = sls::decode(buf, len, 0);
+  TEST_ASSERT_FALSE(decoded.ok);
+  TEST_ASSERT_TRUE(decoded.error == sls::DecodeError::BadValue);
+}
+
+void test_pairing_frame_cut_short_in_the_member_table_is_rejected_as_truncated() {
+  uint8_t buf[sls::kMaxMessageBytes] = {};
+  size_t n = sls::encode(sample_message(sls::MessageType::PairingAck), buf, sizeof(buf));
+  sls::Decoded decoded = sls::decode(buf, n - 1, 0);
+  TEST_ASSERT_FALSE(decoded.ok);
+  TEST_ASSERT_TRUE(decoded.error == sls::DecodeError::Truncated);
+}
+
+void test_pairing_frame_with_trailing_bytes_is_rejected_as_bad_length() {
+  uint8_t buf[sls::kMaxMessageBytes] = {};
+  size_t n = sls::encode(sample_message(sls::MessageType::PairingAck), buf, sizeof(buf));
+  sls::Decoded decoded = sls::decode(buf, n + 6, 0);
+  TEST_ASSERT_FALSE(decoded.ok);
+  TEST_ASSERT_TRUE(decoded.error == sls::DecodeError::BadLength);
+}
+
+void test_encode_rejects_pairing_table_with_more_than_8_members() {
+  sls::PairingInfo info{0, {}};
+  for (size_t i = 0; i < sls::kMaxGroupMembers + 1; ++i) info.members.push_back(member_mac(1));
+  sls::Message message = sample_message(sls::MessageType::PairingHello);
+  message.body = info;
+  uint8_t buf[sls::kMaxMessageBytes];
+  TEST_ASSERT_EQUAL_UINT32(0, sls::encode(message, buf, sizeof(buf)));
+}
+
+void test_encode_rejects_empty_body_for_pairing_messages() {
+  sls::Message message = sample_message(sls::MessageType::PairingHello);
+  message.body = std::monostate{};
+  uint8_t buf[sls::kMaxMessageBytes];
+  TEST_ASSERT_EQUAL_UINT32(0, sls::encode(message, buf, sizeof(buf)));
+}
+
 void test_state_wire_layout_matches_the_golden_bytes() {
   sls::StateSync sync;
   sync.state.look.color_mode = sls::ColorMode::ColorTemp;  // 1
@@ -518,5 +597,11 @@ int main() {
   RUN_TEST(test_later_sequence_number_is_newer_and_earlier_or_equal_is_not);
   RUN_TEST(test_sequence_number_after_wrap_around_is_newer);
   RUN_TEST(test_state_wire_layout_matches_the_golden_bytes);
+  RUN_TEST(test_pairing_hello_and_ack_round_trip_window_age_and_member_table);
+  RUN_TEST(test_pairing_frame_claiming_more_than_8_members_is_rejected_as_bad_value);
+  RUN_TEST(test_pairing_frame_cut_short_in_the_member_table_is_rejected_as_truncated);
+  RUN_TEST(test_pairing_frame_with_trailing_bytes_is_rejected_as_bad_length);
+  RUN_TEST(test_encode_rejects_pairing_table_with_more_than_8_members);
+  RUN_TEST(test_encode_rejects_empty_body_for_pairing_messages);
   return UNITY_END();
 }

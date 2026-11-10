@@ -14,6 +14,10 @@ constexpr size_t kSenderOffset = 8;
 constexpr size_t kHeaderBytes = kSenderOffset + 6;
 constexpr size_t kPresenceBodyBytes = 1 + 4;
 constexpr size_t kChannelMovedBodyBytes = 1;
+// Pairing body: window age (4) and member count (1), then 6 bytes per member.
+constexpr size_t kPairingFixedBodyBytes = 4 + 1;
+constexpr size_t kPairingCountOffset = 4;
+constexpr size_t kMacBytes = 6;
 constexpr size_t kStateBodyBytes = 1 + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + 4 + 4 + 1;
 
 constexpr int kUnknownType = -1;
@@ -30,6 +34,7 @@ int body_bytes(uint8_t type) {
       return kChannelMovedBodyBytes;
     case MessageType::PairingHello:
     case MessageType::PairingAck:
+      return kPairingFixedBodyBytes;  // plus the member table, sized by the count
     case MessageType::OverrideClaim:
     case MessageType::MatterSilent:
       return 0;
@@ -104,12 +109,13 @@ StateSync get_state_body(const uint8_t* b) {
 size_t encode(const Message& message, uint8_t* out, size_t capacity) {
   const int known_size = body_bytes(static_cast<uint8_t>(message.type));
   if (known_size == kUnknownType) return 0;
-  const size_t total = kHeaderBytes + static_cast<size_t>(known_size);
+  size_t total = kHeaderBytes + static_cast<size_t>(known_size);
 
   // The body variant must match the type; check it before writing anything.
   const StateSync* sync = std::get_if<StateSync>(&message.body);
   const Presence* presence = std::get_if<Presence>(&message.body);
   const ChannelMoved* moved = std::get_if<ChannelMoved>(&message.body);
+  const PairingInfo* pairing = std::get_if<PairingInfo>(&message.body);
   switch (message.type) {
     case MessageType::State:
     case MessageType::Heartbeat:
@@ -123,6 +129,9 @@ size_t encode(const Message& message, uint8_t* out, size_t capacity) {
       break;
     case MessageType::PairingHello:
     case MessageType::PairingAck:
+      if (pairing == nullptr || pairing->members.size() > kMaxGroupMembers) return 0;
+      total += kMacBytes * pairing->members.size();
+      break;
     case MessageType::OverrideClaim:
     case MessageType::MatterSilent:
       if (!std::holds_alternative<std::monostate>(message.body)) return 0;
@@ -152,6 +161,14 @@ size_t encode(const Message& message, uint8_t* out, size_t capacity) {
       break;
     case MessageType::PairingHello:
     case MessageType::PairingAck:
+      put32(b, pairing->window_age_ms);
+      b[kPairingCountOffset] = static_cast<uint8_t>(pairing->members.size());
+      for (size_t i = 0; i < pairing->members.size(); ++i) {
+        for (size_t j = 0; j < kMacBytes; ++j) {
+          b[kPairingFixedBodyBytes + i * kMacBytes + j] = pairing->members[i][j];
+        }
+      }
+      break;
     case MessageType::OverrideClaim:
     case MessageType::MatterSilent:
       break;
@@ -178,7 +195,7 @@ Decoded decode(const uint8_t* buf, size_t len, uint32_t my_group_id) {
     result.error = DecodeError::UnknownType;
     return result;
   }
-  const size_t body_size = static_cast<size_t>(known_size);
+  size_t body_size = static_cast<size_t>(known_size);
   const MessageType type = static_cast<MessageType>(buf[kTypeOffset]);
   const uint32_t group_id = get32(buf + kGroupOffset);
   // An unpaired Unit does not know its group yet, so pairing messages skip the group check.
@@ -186,6 +203,18 @@ Decoded decode(const uint8_t* buf, size_t len, uint32_t my_group_id) {
   if (!is_pairing && group_id != my_group_id) {
     result.error = DecodeError::WrongGroup;
     return result;
+  }
+  if (is_pairing) {
+    if (len < kHeaderBytes + kPairingFixedBodyBytes) {
+      result.error = DecodeError::Truncated;
+      return result;
+    }
+    const size_t count = buf[kHeaderBytes + kPairingCountOffset];
+    if (count > kMaxGroupMembers) {
+      result.error = DecodeError::BadValue;
+      return result;
+    }
+    body_size += kMacBytes * count;
   }
   if (len < kHeaderBytes + body_size) {
     result.error = DecodeError::Truncated;
@@ -216,7 +245,18 @@ Decoded decode(const uint8_t* buf, size_t len, uint32_t my_group_id) {
       result.message.body = ChannelMoved{b[0]};
       break;
     case MessageType::PairingHello:
-    case MessageType::PairingAck:
+    case MessageType::PairingAck: {
+      PairingInfo info{};
+      info.window_age_ms = get32(b);
+      const size_t count = b[kPairingCountOffset];
+      for (size_t i = 0; i < count; ++i) {
+        Mac mac;
+        for (size_t j = 0; j < kMacBytes; ++j) mac[j] = b[kPairingFixedBodyBytes + i * kMacBytes + j];
+        info.members.push_back(mac);
+      }
+      result.message.body = info;
+      break;
+    }
     case MessageType::OverrideClaim:
     case MessageType::MatterSilent:
       result.message.body = std::monostate{};

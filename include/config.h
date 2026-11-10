@@ -22,3 +22,12 @@
 
 // How long the Group state must stay unchanged before it is written to flash
 #define PERSIST_SETTLE_MS 3000UL
+
+// XIAO ESP32-C6 BOOT button (GPIO9); active low, wired with the internal pull-up
+#define BOOT_BUTTON_PIN 9
+
+// Wi-Fi channel the Units use for ESP-NOW pairing
+#define ESPNOW_PAIRING_CHANNEL 1
+
+// ESP-NOW local master key (exactly 16 characters) for encrypted Member peers
+#define ESPNOW_LMK "sls-strip-lmk-01"
