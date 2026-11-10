@@ -3,15 +3,11 @@
 namespace sls {
 
 namespace {
-constexpr uint8_t kMinSpeedPct = 1;
-constexpr uint8_t kMaxSpeedPct = 100;
 constexpr uint32_t kMsPerSpeedPct = 50;
 }  // namespace
 
 uint32_t blink_period_ms(uint8_t speed_pct) {
-  if (speed_pct < kMinSpeedPct) speed_pct = kMinSpeedPct;
-  if (speed_pct > kMaxSpeedPct) speed_pct = kMaxSpeedPct;
-  return static_cast<uint32_t>(speed_pct) * kMsPerSpeedPct;
+  return static_cast<uint32_t>(clamp_blink_speed(speed_pct)) * kMsPerSpeedPct;
 }
 
 bool blink_lit(const Look& look, bool open, uint32_t phase_ms) {

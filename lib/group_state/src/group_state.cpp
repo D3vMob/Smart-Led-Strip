@@ -17,12 +17,6 @@ uint8_t clamp_open_level(uint8_t pct) {
   return pct;
 }
 
-uint8_t clamp_blink_speed(uint8_t pct) {
-  if (pct < kMinBlinkSpeedPct) return kMinBlinkSpeedPct;
-  if (pct > kMaxBlinkSpeedPct) return kMaxBlinkSpeedPct;
-  return pct;
-}
-
 Command of_kind(Command::Kind kind) {
   Command command;
   command.kind = kind;
@@ -30,6 +24,12 @@ Command of_kind(Command::Kind kind) {
 }
 
 }  // namespace
+
+uint8_t clamp_blink_speed(uint8_t pct) {
+  if (pct < kMinBlinkSpeedPct) return kMinBlinkSpeedPct;
+  if (pct > kMaxBlinkSpeedPct) return kMaxBlinkSpeedPct;
+  return pct;
+}
 
 Command Command::open() { return of_kind(Kind::Open); }
 Command Command::close() { return of_kind(Kind::Close); }

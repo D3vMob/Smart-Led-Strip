@@ -38,6 +38,9 @@ struct Command {
   static Command set_blink_speed(uint8_t pct);
 };
 
+// Blink speed percentage clamped to 1-100.
+uint8_t clamp_blink_speed(uint8_t pct);
+
 GroupState default_group_state();
 GroupState apply(GroupState state, const Command& command);
 
