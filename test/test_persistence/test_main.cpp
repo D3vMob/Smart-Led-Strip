@@ -17,7 +17,7 @@ static void assert_same_state(const sls::GroupState& expected, const sls::GroupS
   TEST_ASSERT_EQUAL(expected.motion_enabled, actual.motion_enabled);
 }
 
-void test_decoding_an_encoded_state_restores_every_field() {
+static sls::GroupState non_default_state() {
   sls::GroupState state{};
   state.look.color_mode = sls::ColorMode::ColorTemp;
   state.look.hue_deg = 200;
@@ -28,7 +28,11 @@ void test_decoding_an_encoded_state_restores_every_field() {
   state.look.blink_speed_pct = 70;
   state.open = true;
   state.motion_enabled = true;
+  return state;
+}
 
+void test_decoding_an_encoded_state_restores_every_field() {
+  const sls::GroupState state = non_default_state();
   sls::GroupStateBlob blob = sls::encode_group_state(state);
   assert_same_state(state, sls::decode_group_state(blob.data(), blob.size()));
 }
@@ -47,20 +51,6 @@ void test_decoding_an_encoded_state_restores_opposite_field_values() {
 
   sls::GroupStateBlob blob = sls::encode_group_state(state);
   assert_same_state(state, sls::decode_group_state(blob.data(), blob.size()));
-}
-
-static sls::GroupState non_default_state() {
-  sls::GroupState state{};
-  state.look.color_mode = sls::ColorMode::ColorTemp;
-  state.look.hue_deg = 200;
-  state.look.saturation = 120;
-  state.look.color_temp_mireds = 370;
-  state.look.brightness_pct = 55;
-  state.look.blink_on = true;
-  state.look.blink_speed_pct = 70;
-  state.open = true;
-  state.motion_enabled = true;
-  return state;
 }
 
 void test_decoding_a_blob_with_a_bad_checksum_gives_defaults() {
