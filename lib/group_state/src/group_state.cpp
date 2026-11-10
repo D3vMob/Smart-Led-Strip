@@ -1,5 +1,7 @@
 #include "group_state.h"
 
+#include "hue_picker.h"
+
 namespace sls {
 
 namespace {
@@ -7,9 +9,9 @@ namespace {
 // Below this level the Strip would look off while Open, so dimming never goes lower.
 constexpr uint8_t kMinOpenLevelPct = 10;
 constexpr uint8_t kMaxLevelPct = 100;
-constexpr uint16_t kHueDegrees = 360;
 constexpr uint8_t kMinBlinkSpeedPct = 1;
 constexpr uint8_t kMaxBlinkSpeedPct = 100;
+constexpr uint8_t kFullSaturation = 255;
 
 uint8_t clamp_open_level(uint8_t pct) {
   if (pct < kMinOpenLevelPct) return kMinOpenLevelPct;
@@ -54,6 +56,11 @@ Command Command::set_blink_speed(uint8_t pct) {
   command.blink_speed_pct = pct;
   return command;
 }
+Command Command::random_color(uint32_t random_value) {
+  Command command = of_kind(Kind::RandomColor);
+  command.random_value = random_value;
+  return command;
+}
 
 GroupState default_group_state() {
   GroupState state{};
@@ -91,6 +98,15 @@ GroupState apply(GroupState state, const Command& command) {
       break;
     case Command::Kind::SetBlinkSpeed:
       state.look.blink_speed_pct = clamp_blink_speed(command.blink_speed_pct);
+      break;
+    case Command::Kind::RandomColor:
+      // A ColorTemp Look has no hue to avoid, so the random value alone picks it.
+      state.look.hue_deg = state.look.color_mode == ColorMode::ColorTemp
+                               ? static_cast<uint16_t>(command.random_value % kHueDegrees)
+                               : pick_hue(state.look.hue_deg, command.random_value);
+      state.look.color_mode = ColorMode::HueSat;
+      state.look.saturation = kFullSaturation;
+      state.open = true;
       break;
   }
   return state;
