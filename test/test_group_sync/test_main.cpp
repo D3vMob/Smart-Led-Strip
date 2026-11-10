@@ -362,8 +362,81 @@ void test_the_coordinator_ignores_states_and_heartbeats_it_receives() {
   TEST_ASSERT_EQUAL(phase_before, units[0].blink_phase_ms(5000));
 }
 
+void test_an_undecided_unit_that_hears_a_state_becomes_a_member() {
+  std::vector<sls::Mac> table(kMacs, kMacs + 3);
+  sls::GroupState initial = sls::default_group_state();
+  sls::GroupSync coordinator(kMacs[0], kGroupId, table, sls::SyncRole::Coordinator, initial);
+  sls::GroupSync undecided(kMacs[1], kGroupId, table, sls::SyncRole::Undecided, initial);
+  sls::GroupState changed = sls::apply(initial, sls::Command::open());
+
+  for (const sls::Outgoing& o : coordinator.on_local_change(changed, 1000))
+    if (o.to == kMacs[1]) undecided.on_message(o.message, 1000);
+
+  TEST_ASSERT_EQUAL(static_cast<int>(sls::SyncRole::Member), static_cast<int>(undecided.role()));
+  TEST_ASSERT_FALSE(undecided.matter_enabled());
+  assert_same_state(changed, undecided.state());
+}
+
+void test_an_undecided_unit_that_hears_a_heartbeat_becomes_a_member() {
+  std::vector<sls::Mac> table(kMacs, kMacs + 3);
+  sls::GroupState initial = sls::default_group_state();
+  sls::GroupSync coordinator(kMacs[0], kGroupId, table, sls::SyncRole::Coordinator, initial);
+  sls::GroupSync undecided(kMacs[1], kGroupId, table, sls::SyncRole::Undecided, initial);
+  coordinator.on_local_change(sls::apply(initial, sls::Command::open()), 500);
+
+  for (const sls::Outgoing& o : coordinator.on_tick(1000, 6))
+    if (o.to == kMacs[1]) undecided.on_message(o.message, 1000);
+
+  TEST_ASSERT_EQUAL(static_cast<int>(sls::SyncRole::Member), static_cast<int>(undecided.role()));
+  TEST_ASSERT_FALSE(undecided.matter_enabled());
+  assert_same_state(coordinator.state(), undecided.state());
+}
+
+void test_a_member_that_hears_nothing_hunts_across_the_channels_after_six_seconds() {
+  std::vector<sls::GroupSync> units = make_units(sls::SyncRole::Member);
+  const sls::GroupSync& member = units[1];
+  TEST_ASSERT_EQUAL(0, member.listen_channel(5999));
+  TEST_ASSERT_EQUAL(1, member.listen_channel(6000));
+  TEST_ASSERT_EQUAL(1, member.listen_channel(8499));
+  TEST_ASSERT_EQUAL(2, member.listen_channel(8500));
+  TEST_ASSERT_EQUAL(13, member.listen_channel(6000 + 12 * 2500));
+  TEST_ASSERT_EQUAL(1, member.listen_channel(6000 + 13 * 2500));
+}
+
+void test_a_member_stops_hunting_once_it_hears_a_heartbeat_and_hunts_again_after_six_more_seconds() {
+  std::vector<sls::GroupSync> units = make_units(sls::SyncRole::Member);
+  units[0] = sls::GroupSync(kMacs[0], kGroupId, std::vector<sls::Mac>(kMacs, kMacs + 3), sls::SyncRole::Coordinator,
+                            sls::default_group_state());
+  TEST_ASSERT_EQUAL(2, units[1].listen_channel(10000));
+
+  deliver(units, units[0].on_tick(10000, 6), 10000);
+
+  TEST_ASSERT_EQUAL(0, units[1].listen_channel(10000));
+  TEST_ASSERT_EQUAL(0, units[1].listen_channel(15999));
+  TEST_ASSERT_EQUAL(1, units[1].listen_channel(16000));
+}
+
+void test_an_undecided_unit_in_a_group_hunts_like_a_member() {
+  std::vector<sls::GroupSync> units = make_units(sls::SyncRole::Undecided);
+  TEST_ASSERT_EQUAL(0, units[2].listen_channel(5999));
+  TEST_ASSERT_EQUAL(2, units[2].listen_channel(8500));
+}
+
+void test_a_coordinator_never_hunts() {
+  std::vector<sls::GroupSync> units = make_units(sls::SyncRole::Coordinator);
+  TEST_ASSERT_EQUAL(0, units[0].listen_channel(6000));
+  TEST_ASSERT_EQUAL(0, units[0].listen_channel(100000));
+}
+
+void test_a_unit_alone_in_its_group_never_hunts() {
+  sls::GroupSync alone(kMacs[1], kGroupId, std::vector<sls::Mac>{kMacs[1]}, sls::SyncRole::Member, sls::default_group_state());
+  TEST_ASSERT_EQUAL(0, alone.listen_channel(6000));
+  TEST_ASSERT_EQUAL(0, alone.listen_channel(100000));
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_a_member_that_hears_nothing_hunts_across_the_channels_after_six_seconds);
   RUN_TEST(test_the_coordinator_ignores_states_and_heartbeats_it_receives);
   RUN_TEST(test_a_local_change_equal_to_the_current_state_is_a_no_op);
   RUN_TEST(test_an_undecided_unit_applies_a_local_change_but_relays_nothing);
@@ -384,8 +457,14 @@ int main() {
   RUN_TEST(test_the_coordinator_sends_a_heartbeat_to_every_other_member_every_two_seconds);
   RUN_TEST(test_a_member_or_undecided_unit_sends_no_heartbeat);
   RUN_TEST(test_a_member_hearing_a_heartbeat_records_when);
+  RUN_TEST(test_an_undecided_unit_that_hears_a_heartbeat_becomes_a_member);
+  RUN_TEST(test_an_undecided_unit_that_hears_a_state_becomes_a_member);
   RUN_TEST(test_a_change_on_the_coordinator_reaches_every_member);
   RUN_TEST(test_a_member_drops_a_state_with_an_older_sequence);
   RUN_TEST(test_a_member_accepts_a_newer_sequence_across_32_bit_wrap_around);
+  RUN_TEST(test_a_member_stops_hunting_once_it_hears_a_heartbeat_and_hunts_again_after_six_more_seconds);
+  RUN_TEST(test_an_undecided_unit_in_a_group_hunts_like_a_member);
+  RUN_TEST(test_a_coordinator_never_hunts);
+  RUN_TEST(test_a_unit_alone_in_its_group_never_hunts);
   return UNITY_END();
 }

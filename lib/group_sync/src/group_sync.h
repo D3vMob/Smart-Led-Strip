@@ -21,6 +21,12 @@ struct Outgoing {
 
 constexpr uint32_t kHeartbeatIntervalMs = 2000;
 constexpr uint32_t kBlinkRealignMs = 20;
+// A Unit other than the Coordinator that has heard nothing from it for this long starts
+// hunting for it across the Wi-Fi channels.
+constexpr uint32_t kChannelHuntQuietMs = 6000;
+// Time spent listening on each channel while hunting; longer than one Heartbeat interval.
+constexpr uint32_t kChannelHuntDwellMs = 2500;
+constexpr uint8_t kChannelHuntLast = 13;
 
 // Keeps every Member of a Group showing the Coordinator's Group state and
 // blinking in step. Returns the messages to send instead of sending them.
@@ -40,6 +46,7 @@ class GroupSync {
   // its blink phase and the Wi-Fi channel it is on.
   std::vector<Outgoing> on_tick(uint32_t now_ms, uint8_t wifi_channel);
   // State, Heartbeat and MatterSilent from this Group; anything else is ignored.
+  // Hearing any of them turns an Undecided Unit into a Member; a Coordinator keeps its role.
   void on_message(const Message& message, uint32_t now_ms);
 
   SyncRole role() const;
@@ -49,6 +56,13 @@ class GroupSync {
   uint32_t blink_phase_ms(uint32_t now_ms) const;
   // When a State or Heartbeat last arrived from the Coordinator.
   uint32_t last_heard_ms() const;
+  // The Wi-Fi channel to listen on while hunting for the Coordinator, or 0 to
+  // leave the radio where it is. A Member on the pairing channel uses it to find
+  // a Coordinator that moved to its router's Wi-Fi channel: after
+  // kChannelHuntQuietMs without hearing it, step through channels 1 to
+  // kChannelHuntLast, kChannelHuntDwellMs each, until a Heartbeat arrives. A
+  // Coordinator, or a Unit alone in its Group, never hunts.
+  uint8_t listen_channel(uint32_t now_ms) const;
 
  private:
   std::vector<Outgoing> to_other_members(MessageType type, const StateSync* sync) const;

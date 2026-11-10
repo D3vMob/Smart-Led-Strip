@@ -71,6 +71,7 @@ void GroupSync::on_message(const Message& message, uint32_t now_ms) {
   if (role_ == SyncRole::Coordinator) return;  // the Coordinator owns the Group state
   const StateSync* sync = std::get_if<StateSync>(&message.body);
   if (!sync) return;
+  role_ = SyncRole::Member;  // hearing the Coordinator settles an Undecided Unit
   last_heard_ms_ = now_ms;
   // A Heartbeat is the Coordinator's current truth, so it always applies, which
   // also lets Members follow a Coordinator whose sequence restarted on reboot.
@@ -92,5 +93,12 @@ uint32_t GroupSync::blink_phase_ms(uint32_t now_ms) const {
   return blink_clock_.phase_ms(now_ms, blink_period_ms(state_.look.blink_speed_pct));
 }
 uint32_t GroupSync::last_heard_ms() const { return last_heard_ms_; }
+uint8_t GroupSync::listen_channel(uint32_t now_ms) const {
+  if (role_ == SyncRole::Coordinator || members_.size() <= 1) return 0;
+  const uint32_t quiet = now_ms - last_heard_ms_;
+  if (quiet < kChannelHuntQuietMs) return 0;
+  const uint32_t hunting = quiet - kChannelHuntQuietMs;
+  return static_cast<uint8_t>(1 + (hunting / kChannelHuntDwellMs) % kChannelHuntLast);
+}
 
 }  // namespace sls
