@@ -22,16 +22,20 @@ struct GroupState {
 };
 
 struct Command {
-  enum class Kind : uint8_t { Open, Close, SetLevel, SetHueSat };
-  Kind kind;
-  uint8_t level_pct;
-  uint16_t hue_deg;
-  uint8_t saturation;
+  enum class Kind : uint8_t { Open, Close, SetLevel, SetHueSat, SetBlink, SetBlinkSpeed };
+  Kind kind = Kind::Open;
+  uint8_t level_pct = 0;
+  uint16_t hue_deg = 0;
+  uint8_t saturation = 0;
+  bool blink_on = false;
+  uint8_t blink_speed_pct = 0;
 
   static Command open();
   static Command close();
   static Command set_level(uint8_t pct);
   static Command set_hue_sat(uint16_t hue_deg, uint8_t saturation);
+  static Command set_blink(bool on);
+  static Command set_blink_speed(uint8_t pct);
 };
 
 GroupState default_group_state();
