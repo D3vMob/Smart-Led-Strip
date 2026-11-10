@@ -10,6 +10,7 @@
 #include "group_state.h"
 #include "group_store.h"
 #include "ld2410_uart.h"
+#include "matter_endpoints.h"
 #include "pairing.h"
 #include "save_scheduler.h"
 #include "state_store.h"
@@ -92,6 +93,7 @@ void setup() {
   self_mac = espnow.self_mac();
   pairing = std::make_unique<sls::Pairing>(self_mac, load_group_members());
   espnow.set_members(pairing->members(), self_mac);
+  matter_endpoints::begin(group_state);
 }
 
 void loop() {
@@ -113,6 +115,9 @@ void loop() {
     }
   }
   apply_pairing_actions(pairing->on_tick(now_ms), now_ms);
+  // Apply voice writes, then report back the real state, including clamped
+  // values and changes made here (motion, boot restore).
+  matter_endpoints::sync(group_state);
   scheduler.on_change(group_state, now_ms);
   if (scheduler.due(now_ms)) {
     save_group_state(group_state);
