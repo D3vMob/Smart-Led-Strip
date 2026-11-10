@@ -149,6 +149,31 @@ void test_set_hue_sat_wraps_hue_past_360() {
   TEST_ASSERT_EQUAL_UINT16(10, after.look.hue_deg);
 }
 
+void test_enabling_motion_opens_strip_keeping_look() {
+  sls::GroupState closed = sls::apply(open_state_with_custom_look(), sls::Command::close());
+  closed.motion_enabled = false;
+  sls::GroupState after = sls::apply(closed, sls::Command::set_motion_enabled(true));
+  TEST_ASSERT_TRUE(after.motion_enabled);
+  TEST_ASSERT_TRUE(after.open);
+  assert_same_look(closed.look, after.look);
+}
+
+void test_disabling_motion_leaves_open_strip_open() {
+  sls::GroupState before = open_state_with_custom_look();
+  sls::GroupState after = sls::apply(before, sls::Command::set_motion_enabled(false));
+  TEST_ASSERT_FALSE(after.motion_enabled);
+  TEST_ASSERT_TRUE(after.open);
+  assert_same_look(before.look, after.look);
+}
+
+void test_disabling_motion_leaves_closed_strip_closed() {
+  sls::GroupState before = sls::apply(open_state_with_custom_look(), sls::Command::close());
+  sls::GroupState after = sls::apply(before, sls::Command::set_motion_enabled(false));
+  TEST_ASSERT_FALSE(after.motion_enabled);
+  TEST_ASSERT_FALSE(after.open);
+  assert_same_look(before.look, after.look);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_default_state_is_closed_with_default_look);
@@ -167,5 +192,8 @@ int main() {
   RUN_TEST(test_set_hue_sat_switches_to_hue_sat_mode);
   RUN_TEST(test_set_hue_sat_opens_closed_strip);
   RUN_TEST(test_set_hue_sat_wraps_hue_past_360);
+  RUN_TEST(test_enabling_motion_opens_strip_keeping_look);
+  RUN_TEST(test_disabling_motion_leaves_open_strip_open);
+  RUN_TEST(test_disabling_motion_leaves_closed_strip_closed);
   return UNITY_END();
 }

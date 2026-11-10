@@ -72,6 +72,11 @@ Command Command::set_color_temp(uint16_t mireds) {
   command.color_temp_mireds = mireds;
   return command;
 }
+Command Command::set_motion_enabled(bool on) {
+  Command command = of_kind(Kind::SetMotionEnabled);
+  command.motion_enabled = on;
+  return command;
+}
 
 GroupState default_group_state() {
   GroupState state{};
@@ -103,6 +108,10 @@ GroupState apply(GroupState state, const Command& command) {
       state.look.hue_deg = command.hue_deg % kHueDegrees;
       state.look.saturation = command.saturation;
       state.open = true;
+      break;
+    case Command::Kind::SetMotionEnabled:
+      state.motion_enabled = command.motion_enabled;
+      if (command.motion_enabled) state.open = true;
       break;
     case Command::Kind::SetColorTemp:
       state.look.color_mode = ColorMode::ColorTemp;

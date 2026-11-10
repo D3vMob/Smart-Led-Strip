@@ -26,7 +26,7 @@ struct GroupState {
 };
 
 struct Command {
-  enum class Kind : uint8_t { Open, Close, SetLevel, SetHueSat, SetBlink, SetBlinkSpeed, RandomColor, SetColorTemp };
+  enum class Kind : uint8_t { Open, Close, SetLevel, SetHueSat, SetBlink, SetBlinkSpeed, RandomColor, SetColorTemp, SetMotionEnabled };
   Kind kind = Kind::Open;
   uint8_t level_pct = 0;
   uint16_t hue_deg = 0;
@@ -35,6 +35,7 @@ struct Command {
   uint8_t blink_speed_pct = 0;
   uint32_t random_value = 0;
   uint16_t color_temp_mireds = 0;
+  bool motion_enabled = false;
 
   static Command open();
   static Command close();
@@ -44,6 +45,7 @@ struct Command {
   static Command set_blink_speed(uint8_t pct);
   static Command random_color(uint32_t random_value);
   static Command set_color_temp(uint16_t mireds);
+  static Command set_motion_enabled(bool on);
 };
 
 // Blink speed percentage clamped to 1-100.
