@@ -1,0 +1,6 @@
+{
+  "name": "espnow_codec",
+  "version": "0.1.0",
+  "build": { "flags": "-std=gnu++17" },
+  "dependencies": { "group_state": "*" }
+}
