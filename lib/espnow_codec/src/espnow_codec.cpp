@@ -1,5 +1,7 @@
 #include "espnow_codec.h"
 
+#include "hue_picker.h"
+
 namespace sls {
 
 namespace {
