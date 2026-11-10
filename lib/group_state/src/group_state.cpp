@@ -17,11 +17,15 @@ uint8_t clamp_open_level(uint8_t pct) {
 
 }  // namespace
 
-Command Command::open() { return Command{Kind::Open, 0, 0, 0}; }
-Command Command::close() { return Command{Kind::Close, 0, 0, 0}; }
-Command Command::set_level(uint8_t pct) { return Command{Kind::SetLevel, pct, 0, 0}; }
+Command Command::open() { return Command{Kind::Open, 0, 0, 0, false}; }
+Command Command::close() { return Command{Kind::Close, 0, 0, 0, false}; }
+Command Command::set_level(uint8_t pct) { return Command{Kind::SetLevel, pct, 0, 0, false}; }
 Command Command::set_hue_sat(uint16_t hue_deg, uint8_t saturation) {
-  return Command{Kind::SetHueSat, 0, hue_deg, saturation};
+  return Command{Kind::SetHueSat, 0, hue_deg, saturation, false};
+}
+
+Command Command::set_motion_enabled(bool on) {
+  return Command{Kind::SetMotionEnabled, 0, 0, 0, on};
 }
 
 GroupState default_group_state() {
@@ -54,6 +58,10 @@ GroupState apply(GroupState state, const Command& command) {
       state.look.hue_deg = command.hue_deg % kHueDegrees;
       state.look.saturation = command.saturation;
       state.open = true;
+      break;
+    case Command::Kind::SetMotionEnabled:
+      state.motion_enabled = command.motion_enabled;
+      if (command.motion_enabled) state.open = true;
       break;
   }
   return state;
