@@ -1,5 +1,7 @@
 #include "persisted_state.h"
 
+#include "hue_picker.h"
+
 namespace sls {
 
 namespace {

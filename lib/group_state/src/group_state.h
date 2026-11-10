@@ -1,8 +1,6 @@
 #pragma once
 #include <cstdint>
 
-#include "hue_picker.h"
-
 namespace sls {
 
 // Below this level the Strip would look off while Open, so dimming never goes lower.
