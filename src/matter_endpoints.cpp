@@ -5,6 +5,7 @@
 #include <esp_random.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/task.h>
 
 #include "endpoint_mapping.h"
 
@@ -22,9 +23,19 @@ MatterOnOffLight random_color;
 constexpr UBaseType_t kPendingWrites = 16;
 QueueHandle_t pending = nullptr;
 
+// The loop task, which runs begin() and sync(). sync()'s reports go through
+// esp_matter's attribute update, which fires the same change callbacks on the
+// calling task; those are our own echoes, not writes from a controller.
+TaskHandle_t loop_task = nullptr;
+
 // Queues the command a write maps to. Always accepts the write: sync()
 // corrects the attribute afterwards when the state differs from the request.
+// Callbacks on the loop task are echoes of sync()'s own reports and are
+// ignored, so they never round a value or reopen the Strip. A per-task check
+// (not a "reporting" flag) keeps real writes that arrive on the Matter task
+// while sync() is reporting.
 bool apply(bool maps, const sls::Command& command) {
+  if (xTaskGetCurrentTaskHandle() == loop_task) return true;
   if (maps) xQueueSend(pending, &command, 0);
   return true;
 }
@@ -45,6 +56,7 @@ void print_pairing_codes(uint32_t now_ms) {
 }  // namespace
 
 void begin(const sls::GroupState& initial_state) {
+  loop_task = xTaskGetCurrentTaskHandle();
   pending = xQueueCreate(kPendingWrites, sizeof(sls::Command));
   const sls::EndpointReport initial = sls::report_for(initial_state);
 
@@ -99,6 +111,7 @@ void begin(const sls::GroupState& initial_state) {
 }
 
 void sync(sls::GroupState& state) {
+  loop_task = xTaskGetCurrentTaskHandle();
   const uint32_t now_ms = millis();
   if (now_ms - pairing_printed_ms >= kPairingReprintMs) print_pairing_codes(now_ms);
 
