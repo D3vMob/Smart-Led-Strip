@@ -9,6 +9,8 @@ namespace {
 // Below this level the Strip would look off while Open, so dimming never goes lower.
 constexpr uint8_t kMinOpenLevelPct = 10;
 constexpr uint8_t kMaxLevelPct = 100;
+constexpr uint8_t kMinBlinkSpeedPct = 1;
+constexpr uint8_t kMaxBlinkSpeedPct = 100;
 constexpr uint8_t kFullSaturation = 255;
 
 uint8_t clamp_open_level(uint8_t pct) {
@@ -17,16 +19,47 @@ uint8_t clamp_open_level(uint8_t pct) {
   return pct;
 }
 
+Command of_kind(Command::Kind kind) {
+  Command command;
+  command.kind = kind;
+  return command;
+}
+
 }  // namespace
 
-Command Command::open() { return Command{Kind::Open, 0, 0, 0, 0}; }
-Command Command::close() { return Command{Kind::Close, 0, 0, 0, 0}; }
-Command Command::set_level(uint8_t pct) { return Command{Kind::SetLevel, pct, 0, 0, 0}; }
+uint8_t clamp_blink_speed(uint8_t pct) {
+  if (pct < kMinBlinkSpeedPct) return kMinBlinkSpeedPct;
+  if (pct > kMaxBlinkSpeedPct) return kMaxBlinkSpeedPct;
+  return pct;
+}
+
+Command Command::open() { return of_kind(Kind::Open); }
+Command Command::close() { return of_kind(Kind::Close); }
+Command Command::set_level(uint8_t pct) {
+  Command command = of_kind(Kind::SetLevel);
+  command.level_pct = pct;
+  return command;
+}
 Command Command::set_hue_sat(uint16_t hue_deg, uint8_t saturation) {
-  return Command{Kind::SetHueSat, 0, hue_deg, saturation, 0};
+  Command command = of_kind(Kind::SetHueSat);
+  command.hue_deg = hue_deg;
+  command.saturation = saturation;
+  return command;
+}
+Command Command::set_blink(bool on) {
+  Command command = of_kind(Kind::SetBlink);
+  command.blink_on = on;
+  return command;
+}
+Command Command::set_blink_speed(uint8_t pct) {
+  Command command = of_kind(Kind::SetBlinkSpeed);
+  command.blink_speed_pct = pct;
+  return command;
 }
 Command Command::random_color(uint32_t random_value) {
-  return Command{Kind::RandomColor, 0, 0, 0, random_value};
+  Command command = of_kind(Kind::RandomColor);
+  command.random_value = random_value;
+  return command;
 }
 
 GroupState default_group_state() {
@@ -59,6 +92,12 @@ GroupState apply(GroupState state, const Command& command) {
       state.look.hue_deg = command.hue_deg % kHueDegrees;
       state.look.saturation = command.saturation;
       state.open = true;
+      break;
+    case Command::Kind::SetBlink:
+      state.look.blink_on = command.blink_on;
+      break;
+    case Command::Kind::SetBlinkSpeed:
+      state.look.blink_speed_pct = clamp_blink_speed(command.blink_speed_pct);
       break;
     case Command::Kind::RandomColor:
       // A ColorTemp Look has no hue to avoid, so the random value alone picks it.
