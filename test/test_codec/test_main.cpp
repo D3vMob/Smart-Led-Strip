@@ -230,9 +230,12 @@ static sls::Message sample_message(sls::MessageType type) {
   message.sender = {9, 8, 7, 6, 5, 4};
   switch (type) {
     case sls::MessageType::State:
-    case sls::MessageType::Heartbeat:
-      message.body = sls::StateSync{};
+    case sls::MessageType::Heartbeat: {
+      sls::StateSync sync{};
+      sync.state.look.brightness_pct = 50;  // a Look a receiver would accept
+      message.body = sync;
       break;
+    }
     case sls::MessageType::Presence:
       message.body = sls::Presence{true, 1000};
       break;
@@ -305,6 +308,60 @@ void test_type_byte_outside_known_types_is_rejected_as_unknown_type() {
 void test_color_mode_byte_that_is_not_a_known_mode_is_rejected_as_bad_value() {
   // The color_mode byte is the first byte of the State body, right after the 14-byte header.
   TEST_ASSERT_TRUE(decode_error_after_corrupting(14, 7) == sls::DecodeError::BadValue);
+}
+
+// Wire offsets of the State/Heartbeat body fields (header is 14 bytes).
+static const size_t kHueOffset = 15;  // uint16 little-endian
+static const size_t kBrightnessOffset = 20;
+static const size_t kBlinkSpeedOffset = 22;
+
+static sls::Decoded decode_sample_state_with_hue(uint16_t hue_deg) {
+  uint8_t buf[sls::kMaxMessageBytes];
+  size_t n = encode_sample_state(buf);
+  buf[kHueOffset] = static_cast<uint8_t>(hue_deg & 0xFF);
+  buf[kHueOffset + 1] = static_cast<uint8_t>(hue_deg >> 8);
+  return sls::decode(buf, n, 0x12345678);
+}
+
+void test_hue_of_360_or_more_is_rejected_as_bad_value() {
+  sls::Decoded decoded = decode_sample_state_with_hue(360);
+  TEST_ASSERT_FALSE(decoded.ok);
+  TEST_ASSERT_TRUE(decoded.error == sls::DecodeError::BadValue);
+}
+
+void test_hue_of_359_is_accepted() {
+  TEST_ASSERT_TRUE(decode_sample_state_with_hue(359).ok);
+}
+
+static sls::Decoded decode_sample_state_with_byte(size_t index, uint8_t value) {
+  uint8_t buf[sls::kMaxMessageBytes];
+  size_t n = encode_sample_state(buf);
+  buf[index] = value;
+  return sls::decode(buf, n, 0x12345678);
+}
+
+void test_brightness_outside_10_to_100_percent_is_rejected_as_bad_value() {
+  sls::Decoded too_dim = decode_sample_state_with_byte(kBrightnessOffset, 9);
+  TEST_ASSERT_FALSE(too_dim.ok);
+  TEST_ASSERT_TRUE(too_dim.error == sls::DecodeError::BadValue);
+  sls::Decoded too_bright = decode_sample_state_with_byte(kBrightnessOffset, 101);
+  TEST_ASSERT_FALSE(too_bright.ok);
+  TEST_ASSERT_TRUE(too_bright.error == sls::DecodeError::BadValue);
+}
+
+void test_brightness_of_10_and_100_percent_is_accepted() {
+  TEST_ASSERT_TRUE(decode_sample_state_with_byte(kBrightnessOffset, 10).ok);
+  TEST_ASSERT_TRUE(decode_sample_state_with_byte(kBrightnessOffset, 100).ok);
+}
+
+void test_blink_speed_above_100_percent_is_rejected_as_bad_value() {
+  sls::Decoded decoded = decode_sample_state_with_byte(kBlinkSpeedOffset, 101);
+  TEST_ASSERT_FALSE(decoded.ok);
+  TEST_ASSERT_TRUE(decoded.error == sls::DecodeError::BadValue);
+}
+
+void test_blink_speed_of_100_percent_is_accepted() {
+  TEST_ASSERT_TRUE(decode_sample_state_with_byte(kBlinkSpeedOffset, 100).ok);
 }
 
 void test_encoded_length_is_within_the_esp_now_limit() {
@@ -439,6 +496,12 @@ int main() {
   RUN_TEST(test_other_protocol_version_is_rejected_as_bad_version);
   RUN_TEST(test_type_byte_outside_known_types_is_rejected_as_unknown_type);
   RUN_TEST(test_color_mode_byte_that_is_not_a_known_mode_is_rejected_as_bad_value);
+  RUN_TEST(test_hue_of_360_or_more_is_rejected_as_bad_value);
+  RUN_TEST(test_hue_of_359_is_accepted);
+  RUN_TEST(test_brightness_outside_10_to_100_percent_is_rejected_as_bad_value);
+  RUN_TEST(test_brightness_of_10_and_100_percent_is_accepted);
+  RUN_TEST(test_blink_speed_above_100_percent_is_rejected_as_bad_value);
+  RUN_TEST(test_blink_speed_of_100_percent_is_accepted);
   RUN_TEST(test_encoded_length_is_within_the_esp_now_limit);
   RUN_TEST(test_encode_into_too_small_buffer_returns_zero_and_writes_nothing_past_capacity);
   RUN_TEST(test_encode_rejects_body_that_does_not_match_the_type);
