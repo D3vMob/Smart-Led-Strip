@@ -46,8 +46,8 @@ bool FrameParser::feed(uint8_t byte, Frame& out) {
   buf_[len_++] = byte;
   if (len_ < kPrefixLen) return false;
   uint16_t data_len = le16(buf_ + 4);
-  uint16_t total = kPrefixLen + data_len + kFooterLen;
-  if (total > sizeof(buf_)) return resync(out);
+  if (data_len > sizeof(buf_) - kPrefixLen - kFooterLen) return resync(out);
+  uint8_t total = kPrefixLen + data_len + kFooterLen;
   if (len_ < total) return false;
   const uint8_t* footer = is_ack_ ? kAckFooter : kReportFooter;
   for (uint8_t i = 0; i < kFooterLen; i++) {

@@ -1,3 +1,4 @@
+#include <string.h>
 #include <unity.h>
 #include "ld2410.h"
 
@@ -86,7 +87,7 @@ void test_ack_frame_decodes_command_and_success() {
 
 void test_ack_frame_with_failure_status_is_not_ok() {
   uint8_t failed[sizeof(kVersionAck)];
-  for (unsigned i = 0; i < sizeof(failed); i++) failed[i] = kVersionAck[i];
+  memcpy(failed, kVersionAck, sizeof(failed));
   failed[8] = 0x01;
   sls::ld2410::FrameParser parser;
   sls::ld2410::Frame frame = {};
@@ -115,9 +116,15 @@ void test_oversized_length_frame_is_dropped_and_next_frame_decodes() {
   assert_single_good_report(decode_after(bad, sizeof(bad), frames), frames);
 }
 
+void test_length_that_wraps_the_frame_size_is_dropped_and_next_frame_decodes() {
+  const uint8_t bad[] = {0xF4, 0xF3, 0xF2, 0xF1, 0xF6, 0xFF};
+  sls::ld2410::Frame frames[4] = {};
+  assert_single_good_report(decode_after(bad, sizeof(bad), frames), frames);
+}
+
 void test_wrong_length_frame_is_dropped_and_next_frame_decodes() {
   uint8_t bad[sizeof(kBasicReport)];
-  for (unsigned i = 0; i < sizeof(bad); i++) bad[i] = kBasicReport[i];
+  memcpy(bad, kBasicReport, sizeof(bad));
   bad[4] = 0x0C;
   sls::ld2410::Frame frames[4] = {};
   assert_single_good_report(decode_after(bad, sizeof(bad), frames), frames);
@@ -125,7 +132,7 @@ void test_wrong_length_frame_is_dropped_and_next_frame_decodes() {
 
 void test_bad_footer_frame_is_dropped_and_next_frame_decodes() {
   uint8_t bad[sizeof(kBasicReport)];
-  for (unsigned i = 0; i < sizeof(bad); i++) bad[i] = kBasicReport[i];
+  memcpy(bad, kBasicReport, sizeof(bad));
   bad[sizeof(bad) - 1] = 0x00;
   sls::ld2410::Frame frames[4] = {};
   assert_single_good_report(decode_after(bad, sizeof(bad), frames), frames);
@@ -133,7 +140,7 @@ void test_bad_footer_frame_is_dropped_and_next_frame_decodes() {
 
 void test_wrong_head_marker_frame_is_dropped() {
   uint8_t bad[sizeof(kBasicReport)];
-  for (unsigned i = 0; i < sizeof(bad); i++) bad[i] = kBasicReport[i];
+  memcpy(bad, kBasicReport, sizeof(bad));
   bad[7] = 0x00;
   sls::ld2410::Frame frames[4] = {};
   assert_single_good_report(decode_after(bad, sizeof(bad), frames), frames);
@@ -141,7 +148,7 @@ void test_wrong_head_marker_frame_is_dropped() {
 
 void test_wrong_tail_marker_frame_is_dropped() {
   uint8_t bad[sizeof(kBasicReport)];
-  for (unsigned i = 0; i < sizeof(bad); i++) bad[i] = kBasicReport[i];
+  memcpy(bad, kBasicReport, sizeof(bad));
   bad[17] = 0x00;
   sls::ld2410::Frame frames[4] = {};
   assert_single_good_report(decode_after(bad, sizeof(bad), frames), frames);
@@ -302,6 +309,7 @@ int main(int, char**) {
   RUN_TEST(test_ack_frame_decodes_command_and_success);
   RUN_TEST(test_ack_frame_with_failure_status_is_not_ok);
   RUN_TEST(test_oversized_length_frame_is_dropped_and_next_frame_decodes);
+  RUN_TEST(test_length_that_wraps_the_frame_size_is_dropped_and_next_frame_decodes);
   RUN_TEST(test_wrong_length_frame_is_dropped_and_next_frame_decodes);
   RUN_TEST(test_bad_footer_frame_is_dropped_and_next_frame_decodes);
   RUN_TEST(test_wrong_head_marker_frame_is_dropped);
