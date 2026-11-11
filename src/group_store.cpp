@@ -10,6 +10,11 @@ namespace {
 
 constexpr const char* kNamespace = "group";
 constexpr const char* kKey = "members";
+constexpr const char* kRoleKey = "role";
+constexpr const char* kCoordinatorKey = "coord";
+constexpr const char* kSecretKey = "secret";
+constexpr const char* kCoordinatorBootKey = "coordboot";
+constexpr const char* kBootCountKey = "bootcount";
 constexpr const char* kMotionNamespace = "motion";
 constexpr size_t kMacBytes = sizeof(sls::Mac);
 
@@ -47,6 +52,69 @@ void save_group_members(const std::vector<sls::Mac>& members) {
     preferences.putBytes(kKey, buffer, length);
     preferences.end();
   }
+}
+
+std::optional<sls::GroupSecret> load_group_secret() {
+  std::optional<sls::GroupSecret> secret;
+  Preferences preferences;
+  if (!preferences.begin(kNamespace, true)) return secret;
+  sls::GroupSecret buffer;
+  if (preferences.getBytesLength(kSecretKey) == buffer.size() &&
+      preferences.getBytes(kSecretKey, buffer.data(), buffer.size()) == buffer.size()) {
+    secret = buffer;
+  }
+  preferences.end();
+  return secret;
+}
+
+void save_group_secret(const sls::GroupSecret& secret) {
+  Preferences preferences;
+  if (preferences.begin(kNamespace, false)) {
+    preferences.putBytes(kSecretKey, secret.data(), secret.size());
+    preferences.end();
+  }
+}
+
+sls::SyncRecord load_sync_record() {
+  sls::SyncRecord record;
+  Preferences preferences;
+  if (!preferences.begin(kNamespace, true)) return record;
+  const uint8_t stored = preferences.getUChar(kRoleKey, static_cast<uint8_t>(sls::SyncRole::Undecided));
+  if (stored <= static_cast<uint8_t>(sls::SyncRole::Member)) record.role = static_cast<sls::SyncRole>(stored);
+  sls::Mac coordinator;
+  if (preferences.getBytesLength(kCoordinatorKey) == kMacBytes &&
+      preferences.getBytes(kCoordinatorKey, coordinator.data(), kMacBytes) == kMacBytes) {
+    record.coordinator = coordinator;
+  }
+  record.coordinator_boot = preferences.getULong(kCoordinatorBootKey, 0);
+  preferences.end();
+  return record;
+}
+
+void save_sync_record(const sls::SyncRecord& record) {
+  Preferences preferences;
+  if (!preferences.begin(kNamespace, false)) return;
+  preferences.putUChar(kRoleKey, static_cast<uint8_t>(record.role));
+  if (record.coordinator) {
+    preferences.putBytes(kCoordinatorKey, record.coordinator->data(), kMacBytes);
+  } else {
+    preferences.remove(kCoordinatorKey);
+  }
+  if (record.coordinator_boot != 0) {
+    preferences.putULong(kCoordinatorBootKey, record.coordinator_boot);
+  } else {
+    preferences.remove(kCoordinatorBootKey);
+  }
+  preferences.end();
+}
+
+uint32_t next_boot_count() {
+  Preferences preferences;
+  if (!preferences.begin(kNamespace, false)) return 0;
+  const uint32_t boot_count = preferences.getULong(kBootCountKey, 0) + 1;
+  preferences.putULong(kBootCountKey, boot_count);
+  preferences.end();
+  return boot_count;
 }
 
 void clear_motion_master_keys() {

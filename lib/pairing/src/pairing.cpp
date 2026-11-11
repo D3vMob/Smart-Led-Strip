@@ -16,16 +16,17 @@ bool ranks_before(uint32_t press_a, const Mac& mac_a, uint32_t press_b, const Ma
 
 Pairing::Pairing(const Mac& self) : self_(self), members_{self} {}
 
-Pairing::Pairing(const Mac& self, const std::vector<Mac>& persisted)
-    : self_(self), members_{self} {
+Pairing::Pairing(const Mac& self, const std::vector<Mac>& persisted, const GroupSecret& persisted_secret)
+    : self_(self), members_{self}, secret_(persisted_secret) {
   for (const Mac& mac : persisted) add_member(mac);
 }
 
-PairingActions Pairing::on_long_press(uint32_t now_ms) {
+PairingActions Pairing::on_long_press(uint32_t now_ms, const PairingNonce& nonce) {
   if (!window_open_) {
     members_ = {self_};
     heard_.clear();
     session_start_ms_ = now_ms;
+    nonce_ = nonce;
   }
   window_open_ = true;
   window_start_ms_ = now_ms;
@@ -40,6 +41,7 @@ PairingActions Pairing::on_tick(uint32_t now_ms) {
   PairingActions actions;
   if (window_open_ && now_ms - window_start_ms_ >= kPairingWindowMs) {
     window_open_ = false;
+    derive_secret();
     actions.group_formed = true;
   }
   actions.window_open = window_open_;
@@ -68,7 +70,7 @@ PairingActions Pairing::on_ack(const Mac& from, const PairingInfo& info, uint32_
 }
 
 PairingInfo Pairing::pairing_info(uint32_t now_ms) const {
-  return PairingInfo{now_ms - session_start_ms_, members_};
+  return PairingInfo{now_ms - session_start_ms_, members_, nonce_};
 }
 
 uint32_t Pairing::group_id() const {
@@ -94,10 +96,11 @@ bool Pairing::hear(const Mac& from, const PairingInfo& info, uint32_t now_ms) {
   const bool first = found == heard_.end();
   if (first) {
     if (heard_.size() >= kMaxHeardPeers) return false;
-    heard_.push_back({from, press_ms, info.members});
+    heard_.push_back({from, press_ms, info.members, info.nonce});
   } else {
     found->press_ms = press_ms;
     found->table = info.members;
+    found->nonce = info.nonce;
   }
   recompute_members();
   return first;
@@ -115,6 +118,19 @@ bool Pairing::is_closed_out(const Heard& peer) const {
     if (!ranks_before(heard->press_ms, heard->mac, session_start_ms_, self_)) return false;
   }
   return true;
+}
+
+void Pairing::derive_secret() {
+  std::vector<uint8_t> material;
+  for (const Mac& mac : members_) {
+    material.insert(material.end(), mac.begin(), mac.end());
+    const PairingNonce* nonce = &nonce_;
+    for (const Heard& h : heard_) {
+      if (h.mac == mac) nonce = &h.nonce;
+    }
+    material.insert(material.end(), nonce->begin(), nonce->end());
+  }
+  secret_ = members_.size() > 1 ? sha256(material.data(), material.size()) : GroupSecret{};
 }
 
 void Pairing::recompute_members() {

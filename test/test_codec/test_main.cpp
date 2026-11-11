@@ -223,6 +223,14 @@ static const sls::MessageType kAllTypes[] = {
     sls::MessageType::PairingAck,    sls::MessageType::OverrideClaim,
     sls::MessageType::ChannelMoved,  sls::MessageType::MatterSilent};
 
+static sls::SyncAuth sample_auth() {
+  sls::SyncAuth auth;
+  auth.boot_count = 0xCAFEF00D;
+  auth.counter = 0x00000102;
+  for (size_t i = 0; i < auth.tag.size(); ++i) auth.tag[i] = static_cast<uint8_t>(0xB0 + i);
+  return auth;
+}
+
 static sls::Message sample_message(sls::MessageType type) {
   sls::Message message;
   message.type = type;
@@ -460,13 +468,28 @@ void test_pairing_hello_and_ack_round_trip_window_age_and_member_table() {
   check_pairing_info_round_trips(sls::MessageType::PairingAck, 5, 1);
 }
 
+void test_pairing_messages_keep_their_nonce_across_encode_and_decode() {
+  sls::PairingInfo info{7, {{1, 2, 3, 4, 5, 6}}};
+  for (size_t i = 0; i < info.nonce.size(); ++i) info.nonce[i] = uint8_t(0xA0 + i);
+  sls::Message message = sample_message(sls::MessageType::PairingAck);
+  message.body = info;
+  uint8_t buf[sls::kMaxMessageBytes];
+  size_t n = sls::encode(message, buf, sizeof(buf));
+  TEST_ASSERT_GREATER_THAN(0, n);
+  sls::Decoded decoded = sls::decode(buf, n, 0);
+  TEST_ASSERT_TRUE(decoded.ok);
+  const sls::PairingInfo* got = std::get_if<sls::PairingInfo>(&decoded.message.body);
+  TEST_ASSERT_NOT_NULL(got);
+  TEST_ASSERT_TRUE(info.nonce == got->nonce);
+}
+
 void test_pairing_frame_claiming_more_than_8_members_is_rejected_as_bad_value() {
   uint8_t buf[sls::kMaxMessageBytes] = {};
   size_t n = sls::encode(sample_message(sls::MessageType::PairingHello), buf, sizeof(buf));
   TEST_ASSERT_GREATER_THAN(0, n);
   const size_t kCountOffset = 14 + 4;
   buf[kCountOffset] = 9;
-  size_t len = 14 + 5 + 6 * 9;
+  size_t len = 14 + 5 + sls::kPairingNonceBytes + 6 * 9;
   sls::Decoded decoded = sls::decode(buf, len, 0);
   TEST_ASSERT_FALSE(decoded.ok);
   TEST_ASSERT_TRUE(decoded.error == sls::DecodeError::BadValue);
@@ -524,9 +547,10 @@ void test_state_wire_layout_matches_the_golden_bytes() {
   message.group_id = 0x11223344;
   message.sender = {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5};
   message.body = sync;
+  message.auth = sample_auth();
 
   const uint8_t expected[] = {
-      'S', 'L', 1, 1,                          // magic, version, type
+      'S', 'L', 2, 1,                          // magic, version, type
       0x44, 0x33, 0x22, 0x11,                  // group id, little-endian
       0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5,      // sender MAC
       0x01,                                    // color_mode
@@ -540,7 +564,11 @@ void test_state_wire_layout_matches_the_golden_bytes() {
       0x00,                                    // motion_enabled
       0x04, 0x03, 0x02, 0x01,                  // seq
       0x0D, 0x0C, 0x0B, 0x0A,                  // blink_phase_ms
-      0x06};                                   // wifi_channel
+      0x06,                                    // wifi_channel
+      0x0D, 0xF0, 0xFE, 0xCA,                  // auth boot_count
+      0x02, 0x01, 0x00, 0x00,                  // auth counter
+      0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7,
+      0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF};  // auth tag
 
   uint8_t buf[sls::kMaxMessageBytes];
   size_t n = sls::encode(message, buf, sizeof(buf));
@@ -568,9 +596,49 @@ void test_state_wire_layout_matches_the_golden_bytes() {
   TEST_ASSERT_EQUAL_UINT8(6, got->wifi_channel);
 }
 
+void test_sync_messages_keep_their_auth_fields_across_encode_and_decode() {
+  const sls::MessageType synced[] = {sls::MessageType::State, sls::MessageType::Heartbeat,
+                                     sls::MessageType::MatterSilent};
+  for (sls::MessageType type : synced) {
+    sls::Message message = sample_message(type);
+    message.auth = sample_auth();
+    uint8_t buf[sls::kMaxMessageBytes];
+    size_t n = sls::encode(message, buf, sizeof(buf));
+    TEST_ASSERT_GREATER_THAN(0, n);
+
+    sls::Decoded decoded = sls::decode(buf, n, 0x12345678);
+    TEST_ASSERT_TRUE(decoded.ok);
+    TEST_ASSERT_EQUAL_UINT32(0xCAFEF00D, decoded.message.auth.boot_count);
+    TEST_ASSERT_EQUAL_UINT32(0x102, decoded.message.auth.counter);
+    TEST_ASSERT_TRUE(message.auth.tag == decoded.message.auth.tag);
+  }
+}
+
+void test_sync_frame_one_byte_short_of_the_auth_trailer_is_rejected_as_truncated() {
+  const sls::MessageType synced[] = {sls::MessageType::State, sls::MessageType::Heartbeat,
+                                     sls::MessageType::MatterSilent};
+  for (sls::MessageType type : synced) {
+    uint8_t buf[sls::kMaxMessageBytes];
+    size_t full = sls::encode(sample_message(type), buf, sizeof(buf));
+    sls::Decoded decoded = sls::decode(buf, full - 1, 0x12345678);
+    TEST_ASSERT_FALSE(decoded.ok);
+    TEST_ASSERT_TRUE(decoded.error == sls::DecodeError::Truncated);
+  }
+}
+
+void test_messages_without_sync_auth_carry_no_auth_bytes() {
+  uint8_t buf[sls::kMaxMessageBytes];
+  TEST_ASSERT_EQUAL_UINT32(14, sls::encode(sample_message(sls::MessageType::OverrideClaim), buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_UINT32(14 + 5, sls::encode(sample_message(sls::MessageType::Presence), buf, sizeof(buf)));
+  TEST_ASSERT_EQUAL_UINT32(14 + 1, sls::encode(sample_message(sls::MessageType::ChannelMoved), buf, sizeof(buf)));
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_state_message_round_trips_with_every_field_intact);
+  RUN_TEST(test_sync_messages_keep_their_auth_fields_across_encode_and_decode);
+  RUN_TEST(test_sync_frame_one_byte_short_of_the_auth_trailer_is_rejected_as_truncated);
+  RUN_TEST(test_messages_without_sync_auth_carry_no_auth_bytes);
   RUN_TEST(test_heartbeat_message_round_trips_with_every_field_intact);
   RUN_TEST(test_presence_message_round_trips_onset_and_absence);
   RUN_TEST(test_pairing_hello_and_ack_decode_for_unpaired_unit);
@@ -598,6 +666,7 @@ int main() {
   RUN_TEST(test_sequence_number_after_wrap_around_is_newer);
   RUN_TEST(test_state_wire_layout_matches_the_golden_bytes);
   RUN_TEST(test_pairing_hello_and_ack_round_trip_window_age_and_member_table);
+  RUN_TEST(test_pairing_messages_keep_their_nonce_across_encode_and_decode);
   RUN_TEST(test_pairing_frame_claiming_more_than_8_members_is_rejected_as_bad_value);
   RUN_TEST(test_pairing_frame_cut_short_in_the_member_table_is_rejected_as_truncated);
   RUN_TEST(test_pairing_frame_with_trailing_bytes_is_rejected_as_bad_length);

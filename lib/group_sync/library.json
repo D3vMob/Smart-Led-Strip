@@ -1,0 +1,6 @@
+{
+  "name": "group_sync",
+  "version": "0.1.0",
+  "build": { "flags": "-std=gnu++17" },
+  "dependencies": { "espnow_codec": "*", "blink": "*", "sync_auth": "*" }
+}

@@ -1,6 +1,7 @@
 #include "matter_endpoints.h"
 
 #include <Arduino.h>
+#include <atomic>
 #include <Matter.h>
 #include <esp_random.h>
 #include <freertos/FreeRTOS.h>
@@ -27,6 +28,9 @@ QueueHandle_t pending = nullptr;
 // esp_matter's attribute update, which fires the same change callbacks on the
 // calling task; those are our own echoes, not writes from a controller.
 TaskHandle_t loop_task = nullptr;
+
+// Set from Matter's event task while a commissioning session is under way.
+std::atomic<bool> commissioning_session{false};
 
 // Queues the command a write maps to. Always accepts the write: sync()
 // corrects the attribute afterwards when the state differs from the request.
@@ -106,6 +110,14 @@ void begin(const sls::GroupState& initial_state) {
 
   // Commissioning is the standard BLE flow: the phone app hands over the Wi-Fi
   // credentials, so no SSID is set here.
+  Matter.onEvent([](matterEvent_t event, const chip::DeviceLayer::ChipDeviceEvent*) {
+    if (event == MATTER_COMMISSIONING_SESSION_STARTED) {
+      commissioning_session = true;
+    } else if (event == MATTER_COMMISSIONING_SESSION_STOPPED || event == MATTER_COMMISSIONING_COMPLETE ||
+               event == MATTER_FAIL_SAFE_TIMER_EXPIRED) {
+      commissioning_session = false;
+    }
+  });
   Matter.begin();
   print_pairing_codes(millis());
 }
@@ -132,5 +144,8 @@ void sync(sls::GroupState& state) {
   motion.setOnOff(values.motion.on);
   random_color.setOnOff(values.random_color.on);
 }
+
+bool commissioned() { return Matter.isDeviceCommissioned(); }
+bool commissioning() { return commissioning_session; }
 
 }  // namespace matter_endpoints

@@ -1,6 +1,8 @@
 #include <Arduino.h>
+#include <WiFi.h>
 
 #include <memory>
+#include <optional>
 #include <variant>
 
 #include "blink.h"
@@ -9,6 +11,7 @@
 #include "espnow_link.h"
 #include "group_state.h"
 #include "group_store.h"
+#include "group_sync.h"
 #include "ld2410_uart.h"
 #include "matter_endpoints.h"
 #include "pairing.h"
@@ -24,11 +27,14 @@ StripOutput strip(LED_COUNT, LED_DATA_PIN, LED_PIXEL_TYPE, MAX_MILLIAMPS);
 Ld2410Uart sensor(Serial1, LD2410_RX_PIN, LD2410_TX_PIN, LD2410_DETECT_TIMEOUT_MS);
 sls::GroupState group_state = sls::default_group_state();
 sls::SaveScheduler scheduler(group_state, PERSIST_SETTLE_MS);
-sls::BlinkClock blink_clock;
 sls::ButtonGesture button;
 EspNowLink espnow;
 sls::Mac self_mac = {};
 std::unique_ptr<sls::Pairing> pairing;
+std::unique_ptr<sls::GroupSync> group_sync;
+bool matter_started = false;
+uint32_t boot_count = 0;
+sls::SyncRecord saved_record;
 SensorStatus reported_status = SensorStatus::Probing;
 bool reported_present = false;
 
@@ -64,6 +70,42 @@ sls::Look pairing_look(uint32_t now_ms) {
   return look;
 }
 
+void build_group_sync() {
+  saved_record = load_sync_record();
+  group_sync = std::make_unique<sls::GroupSync>(self_mac, pairing->group_id(), pairing->members(),
+                                                pairing->group_secret(), saved_record, boot_count, group_state);
+}
+
+// Saves the role, Coordinator and Coordinator boot when they differ from what is in flash.
+void save_record_if_changed() {
+  const sls::SyncRecord record = group_sync->record();
+  if (record.role == saved_record.role && record.coordinator == saved_record.coordinator &&
+      record.coordinator_boot == saved_record.coordinator_boot) {
+    return;
+  }
+  save_sync_record(record);
+  saved_record = record;
+}
+
+void handle_sync_message(const sls::Message& message, const sls::Mac& from, uint32_t now_ms) {
+  const sls::SyncRole before = group_sync->role();
+  const bool applied = group_sync->on_message(message, from, now_ms);
+  const sls::StateSync* sync = std::get_if<sls::StateSync>(&message.body);
+  // The channel comes off the air, so never trust it beyond the channels hunted.
+  if (applied && message.type == sls::MessageType::Heartbeat && sync != nullptr &&
+      group_sync->role() == sls::SyncRole::Member && sync->wifi_channel >= 1 &&
+      sync->wifi_channel <= sls::kChannelHuntLast) {
+    espnow.set_channel(sync->wifi_channel);
+  }
+  save_record_if_changed();
+  if (before != sls::SyncRole::Member && group_sync->role() == sls::SyncRole::Member) {
+    if (matter_started) {
+      Serial.println("Another Unit is the Coordinator: restarting to stay Matter-silent");
+      ESP.restart();
+    }
+  }
+}
+
 void apply_pairing_actions(const sls::PairingActions& actions, uint32_t now_ms) {
   if (actions.send_hello) espnow.send_hello(pairing->group_id(), self_mac, pairing->pairing_info(now_ms));
   if (actions.send_ack_to) {
@@ -71,11 +113,18 @@ void apply_pairing_actions(const sls::PairingActions& actions, uint32_t now_ms) 
   }
   if (actions.group_formed) {
     save_group_members(pairing->members());
+    save_group_secret(pairing->group_secret());
     clear_motion_master_keys();
     espnow.set_members(pairing->members(), self_mac);
+    group_sync->regroup(pairing->group_id(), pairing->members(), pairing->group_secret());
+    save_record_if_changed();
     Serial.printf("Group formed: id %08x, %u member(s)\n",
                   static_cast<unsigned>(pairing->group_id()),
                   static_cast<unsigned>(pairing->members().size()));
+    if (!matter_started) {
+      Serial.println("Restarting so this Unit boots Matter-capable for the new Group");
+      ESP.restart();
+    }
   }
 }
 
@@ -91,9 +140,22 @@ void setup() {
   pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
   espnow.begin();
   self_mac = espnow.self_mac();
-  pairing = std::make_unique<sls::Pairing>(self_mac, load_group_members());
+  boot_count = next_boot_count();
+  const std::optional<sls::GroupSecret> secret = load_group_secret();
+  if (secret) {
+    pairing = std::make_unique<sls::Pairing>(self_mac, load_group_members(), *secret);
+  } else {
+    pairing = std::make_unique<sls::Pairing>(self_mac);
+    Serial.println("No Group secret saved: re-pair the Units to authenticate their sync");
+  }
   espnow.set_members(pairing->members(), self_mac);
-  matter_endpoints::begin(group_state);
+  build_group_sync();
+  if (group_sync->matter_enabled()) {
+    matter_endpoints::begin(group_state);
+    matter_started = true;
+  } else {
+    Serial.println("Member: Matter-silent, following the Coordinator");
+  }
 }
 
 void loop() {
@@ -102,10 +164,17 @@ void loop() {
   if (sensor.poll(now_ms, presence)) report_presence(presence);
   report_sensor_status(now_ms);
   if (button.update(digitalRead(BOOT_BUTTON_PIN) == LOW, now_ms) == sls::Gesture::LongPress) {
-    apply_pairing_actions(pairing->on_long_press(now_ms), now_ms);
+    sls::PairingNonce nonce;
+    esp_fill_random(nonce.data(), nonce.size());
+    apply_pairing_actions(pairing->on_long_press(now_ms, nonce), now_ms);
   }
   sls::Message message;
-  while (espnow.poll(message, pairing->group_id())) {
+  sls::Mac from;
+  while (espnow.poll(message, from, pairing->group_id())) {
+    if (sls::is_sync_message(message.type)) {
+      handle_sync_message(message, from, now_ms);
+      continue;
+    }
     const sls::PairingInfo* info = std::get_if<sls::PairingInfo>(&message.body);
     if (info == nullptr) continue;
     if (message.type == sls::MessageType::PairingHello) {
@@ -115,14 +184,32 @@ void loop() {
     }
   }
   apply_pairing_actions(pairing->on_tick(now_ms), now_ms);
+  // A Unit joined to a router stays on its channel. Otherwise pair on the
+  // pairing channel, or hunt for a Coordinator that moved to its router's channel,
+  // except while Matter commissioning is scanning for or joining the router.
+  group_sync->on_commissioning(matter_started && matter_endpoints::commissioning());
+  if (!WiFi.isConnected()) {
+    const uint8_t channel = pairing->window_open() ? ESPNOW_PAIRING_CHANNEL : group_sync->listen_channel(now_ms);
+    if (channel != 0) espnow.set_channel(channel);
+  }
   // Apply voice writes, then report back the real state, including clamped
   // values and changes made here (motion, boot restore).
-  matter_endpoints::sync(group_state);
+  if (group_sync->matter_enabled()) {
+    matter_endpoints::sync(group_state);
+    if (matter_endpoints::commissioned() && group_sync->role() != sls::SyncRole::Coordinator) {
+      espnow.send_all(group_sync->on_commissioned(now_ms));
+      save_record_if_changed();
+    }
+  } else {
+    group_state = group_sync->state();  // the Coordinator owns the state
+  }
+  espnow.send_all(group_sync->on_local_change(group_state, now_ms));
+  espnow.send_all(group_sync->on_tick(now_ms, WiFi.channel()));
   scheduler.on_change(group_state, now_ms);
   if (scheduler.due(now_ms)) {
     save_group_state(group_state);
   }
-  const uint32_t phase = blink_clock.phase_ms(now_ms, sls::blink_period_ms(group_state.look.blink_speed_pct));
+  const uint32_t phase = group_sync->blink_phase_ms(now_ms);
   const bool lit = sls::blink_lit(group_state.look, group_state.open, phase);
   if (pairing->window_open()) {
     strip.render(pairing_look(now_ms), true);
