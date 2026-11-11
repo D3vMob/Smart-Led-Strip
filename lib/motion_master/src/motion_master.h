@@ -35,7 +35,6 @@ class MotionMaster {
   void on_tick(uint32_t now_ms);
 
   std::optional<Mac> master() const;           // none when no Sensor unit is heard
-  std::optional<bool> master_present() const;  // the master's last presence level; none without a master
   // What the motion rules follow: none while no Sensor unit is known, absent when none is the master.
   std::optional<bool> motion_presence() const;
   std::vector<Mac> ranking() const;            // failover order, best first

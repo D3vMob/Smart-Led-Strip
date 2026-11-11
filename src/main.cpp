@@ -48,7 +48,7 @@ bool reported_present = false;
 // Sensor unit side: the current presence level and the time spent present.
 bool sensor_present = false;
 uint32_t total_presence_ms = 0;
-uint32_t last_sensor_tick_ms = 0;
+std::optional<uint32_t> last_sensor_tick_ms;  // none until the LD2410 is detected
 std::optional<bool> sent_level;
 uint32_t last_presence_sent_ms = 0;
 bool flashing = false;
@@ -177,7 +177,7 @@ void send_presence_report(uint32_t now_ms) {
 // A Sensor unit reports its presence on every change and as a keepalive.
 void report_presence_level(uint32_t now_ms) {
   if (sensor.status(now_ms) != SensorStatus::Sensor) return;
-  if (sensor_present) total_presence_ms += now_ms - last_sensor_tick_ms;
+  if (sensor_present && last_sensor_tick_ms) total_presence_ms += now_ms - *last_sensor_tick_ms;
   last_sensor_tick_ms = now_ms;
   const bool changed = !sent_level || *sent_level != sensor_present;
   if (changed || now_ms - last_presence_sent_ms >= kPresenceKeepaliveMs) send_presence_report(now_ms);

@@ -85,12 +85,6 @@ std::optional<Mac> MotionMaster::master() const {
   return m->mac;
 }
 
-std::optional<bool> MotionMaster::master_present() const {
-  const Sensor* m = find_master();
-  if (!m) return std::nullopt;
-  return m->present;
-}
-
 std::optional<bool> MotionMaster::motion_presence() const {
   if (sensors_.empty()) return std::nullopt;
   const Sensor* m = find_master();

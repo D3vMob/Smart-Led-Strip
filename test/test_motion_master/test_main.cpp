@@ -13,8 +13,8 @@ void test_group_with_one_sensor_uses_it_as_master() {
   mm.on_presence_report(kSensorA, false, 0, 0);
   TEST_ASSERT_TRUE(mm.master().has_value());
   TEST_ASSERT_TRUE(kSensorA == *mm.master());
-  TEST_ASSERT_TRUE(mm.master_present().has_value());
-  TEST_ASSERT_FALSE(*mm.master_present());
+  TEST_ASSERT_TRUE(mm.motion_presence().has_value());
+  TEST_ASSERT_FALSE(*mm.motion_presence());
 }
 
 void test_group_without_sensor_has_no_master() {
@@ -145,15 +145,14 @@ void test_all_sensors_silent_leaves_no_master() {
   mm.on_presence_report(kHigh, false, 0, 0);
   mm.on_tick(10001);
   TEST_ASSERT_FALSE(mm.master().has_value());
-  TEST_ASSERT_FALSE(mm.master_present().has_value());
 }
 
-void test_master_present_follows_the_new_master_after_failover() {
+void test_motion_presence_follows_the_new_master_after_failover() {
   sls::MotionMaster mm;
   a_goes_quiet_while_b_keeps_reporting(mm);
   mm.on_tick(10001);
-  TEST_ASSERT_TRUE(mm.master_present().has_value());
-  TEST_ASSERT_TRUE(*mm.master_present());
+  TEST_ASSERT_TRUE(mm.motion_presence().has_value());
+  TEST_ASSERT_TRUE(*mm.motion_presence());
 }
 
 void test_failover_timing_survives_the_millisecond_clock_wrapping() {
@@ -213,7 +212,7 @@ void test_silent_override_stays_master_with_its_last_presence() {
   mm.on_presence_report(kLow, false, 0, 29999);
   mm.on_tick(30000);
   TEST_ASSERT_TRUE(kHigh == *mm.master());
-  TEST_ASSERT_TRUE(*mm.master_present());
+  TEST_ASSERT_TRUE(*mm.motion_presence());
 }
 
 void test_a_later_override_replaces_a_silent_override() {
@@ -402,7 +401,7 @@ int main(int, char**) {
   RUN_TEST(test_master_silent_for_more_than_10_s_fails_over_to_next_sensor);
   RUN_TEST(test_silent_master_takes_its_place_back_when_it_reports_again);
   RUN_TEST(test_all_sensors_silent_leaves_no_master);
-  RUN_TEST(test_master_present_follows_the_new_master_after_failover);
+  RUN_TEST(test_motion_presence_follows_the_new_master_after_failover);
   RUN_TEST(test_failover_timing_survives_the_millisecond_clock_wrapping);
   RUN_TEST(test_override_makes_a_sensor_master_and_ends_calibration);
   RUN_TEST(test_onsets_after_an_override_do_not_change_the_master);
