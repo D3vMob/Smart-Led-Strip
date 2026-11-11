@@ -137,7 +137,7 @@ void test_a_pairing_hello_never_verifies() {
 static sls::Message presence_message() {
   sls::Message message = heartbeat();
   message.type = sls::MessageType::Presence;
-  message.body = sls::Presence{true, 4200};
+  message.body = sls::Presence{true, 4200, false};
   return message;
 }
 

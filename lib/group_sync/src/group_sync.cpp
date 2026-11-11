@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "config.h"
+
 namespace sls {
 
 namespace {
@@ -25,14 +27,20 @@ GroupSync::GroupSync(const Mac& self, uint32_t group_id, std::vector<Mac> member
       role_(persisted.role),
       state_(initial),
       coordinator_(persisted.role == SyncRole::Member ? persisted.coordinator : std::nullopt),
-      coordinator_boot_(persisted.role == SyncRole::Member ? persisted.coordinator_boot : 0) {}
+      coordinator_boot_(persisted.role == SyncRole::Member ? persisted.coordinator_boot : 0),
+      home_channel_(persisted.channel >= 1 && persisted.channel <= kLastWifiChannel ? persisted.channel : 0) {}
 
 std::vector<Outgoing> GroupSync::to_other_members(MessageType type, const StateSync* sync) {
+  Message message{type, group_id_, self_, std::monostate{}};
+  if (sync != nullptr) message.body = *sync;
+  return to_other_members(message);
+}
+
+std::vector<Outgoing> GroupSync::to_other_members(const Message& body) {
   std::vector<Outgoing> out;
   for (const Mac& member : members_) {
     if (member == self_) continue;
-    Message message{type, group_id_, self_, std::monostate{}};
-    if (sync != nullptr) message.body = *sync;
+    Message message = body;
     message.auth.boot_count = boot_count_;
     message.auth.counter = ++counter_;
     sign(message, secret_);
@@ -46,8 +54,11 @@ std::vector<Outgoing> GroupSync::on_commissioned(uint32_t) {
   return to_other_members(MessageType::MatterSilent, nullptr);
 }
 
-std::vector<Outgoing> GroupSync::on_local_change(const GroupState& state, uint32_t) {
-  if (role_ == SyncRole::Member) return {};
+std::vector<Outgoing> GroupSync::on_local_change(const GroupState& state, uint32_t now_ms) {
+  if (role_ == SyncRole::Member) {
+    if (silent(now_ms)) state_ = state;  // keeps the last state and its motion changes, relays nothing
+    return {};
+  }
   if (same_state(state, state_)) return {};
   state_ = state;
   if (role_ != SyncRole::Coordinator) return {};
@@ -56,12 +67,13 @@ std::vector<Outgoing> GroupSync::on_local_change(const GroupState& state, uint32
   return to_other_members(MessageType::State, &sync);
 }
 
-std::vector<Outgoing> GroupSync::on_tick(uint32_t now_ms, uint8_t wifi_channel) {
+std::vector<Outgoing> GroupSync::on_tick(uint32_t now_ms, uint8_t wifi_channel, std::optional<Mac> motion_master) {
   if (role_ != SyncRole::Coordinator) return {};
-  if (sent_heartbeat_ && now_ms - last_heartbeat_ms_ < kHeartbeatIntervalMs) return {};
+  if (!heartbeat_due_ && sent_heartbeat_ && now_ms - last_heartbeat_ms_ < kHeartbeatIntervalMs) return {};
+  heartbeat_due_ = false;
   sent_heartbeat_ = true;
   last_heartbeat_ms_ = now_ms;
-  const StateSync sync{state_, seq_, blink_phase_ms(now_ms), wifi_channel};
+  const StateSync sync{state_, seq_, blink_phase_ms(now_ms), wifi_channel, motion_master};
   return to_other_members(MessageType::Heartbeat, &sync);
 }
 
@@ -89,6 +101,7 @@ bool GroupSync::on_message(const Message& message, const Mac& from, uint32_t now
   if (role_ == SyncRole::Coordinator) return false;  // the Coordinator owns the Group state
   if (coordinator_ && *coordinator_ != from) return false;  // only the Coordinator we follow
   if (message.type != MessageType::MatterSilent && !std::get_if<StateSync>(&message.body)) return false;
+  const bool was_silent = silent(now_ms);
   if (!fresh(message.auth)) return false;  // a replayed or earlier-boot frame: no effect at all
   coordinator_boot_ = message.auth.boot_count;
   last_counter_ = message.auth.counter;
@@ -112,7 +125,35 @@ bool GroupSync::on_message(const Message& message, const Mac& from, uint32_t now
   }
   heard_any_ = true;
   last_seq_ = sync->seq;
+  if (was_silent && motion_master_) {
+    keeping_open_ = true;  // a Motion master may have changed Open/Closed here while the Coordinator was away
+    return_seq_ = sync->seq;
+  } else if (keeping_open_ && seq_is_newer(sync->seq, return_seq_)) {
+    keeping_open_ = false;
+  }
+  const bool own_open = state_.open;
   state_ = sync->state;
+  if (keeping_open_) state_.open = own_open;
+  motion_master_ = sync->motion_master;
+  if (message.type == MessageType::Heartbeat && sync->wifi_channel >= 1 && sync->wifi_channel <= kLastWifiChannel) {
+    if (was_silent && sync->wifi_channel != home()) {
+      announcement_ = ChannelAnnouncement{
+          home(), to_other_members(Message{MessageType::ChannelMoved, group_id_, self_, ChannelMoved{sync->wifi_channel}})};
+    }
+    home_channel_ = sync->wifi_channel;
+  }
+  return true;
+}
+
+bool GroupSync::on_master_presence(const Mac& sender, bool open, const std::optional<Mac>& master, uint32_t now_ms) {
+  if (role_ != SyncRole::Coordinator || !master || sender != *master) return false;
+  const bool returned = !master_report_ || master_report_->first != sender ||
+                        now_ms - master_report_->second > kCoordinatorSilenceMs;
+  master_report_ = std::make_pair(sender, now_ms);
+  if (!returned) return false;
+  state_.open = open;
+  ++seq_;
+  heartbeat_due_ = true;
   return true;
 }
 
@@ -125,17 +166,39 @@ std::vector<Outgoing> GroupSync::to_coordinator(const Message& body) {
   return {{*coordinator_, message}};
 }
 
-std::vector<Outgoing> GroupSync::report_presence(bool present, uint32_t total_presence_ms) {
-  return to_coordinator(Message{MessageType::Presence, group_id_, self_, Presence{present, total_presence_ms}});
+std::vector<Outgoing> GroupSync::report_presence(bool present, uint32_t total_presence_ms, bool open,
+                                              uint32_t now_ms) {
+  const Presence presence{present, total_presence_ms, open};
+  if (silent(now_ms)) {
+    return to_other_members(Message{MessageType::Presence, group_id_, self_, presence});
+  }
+  return to_coordinator(Message{MessageType::Presence, group_id_, self_, presence});
 }
 
 std::vector<Outgoing> GroupSync::claim_override() {
   return to_coordinator(Message{MessageType::OverrideClaim, group_id_, self_, std::monostate{}});
 }
 
-bool GroupSync::on_member_report(const Message& message, const Mac& from) {
-  if (role_ != SyncRole::Coordinator) return false;
-  if (message.type != MessageType::Presence && message.type != MessageType::OverrideClaim) return false;
+bool GroupSync::wants_report(const Message& message, const Mac& from, uint32_t now_ms) const {
+  switch (message.type) {
+    case MessageType::Presence:
+      if (role_ == SyncRole::Coordinator) return true;
+      // A silent Member follows the Motion master named in the Coordinator's last Heartbeat.
+      return role_ == SyncRole::Member && silent(now_ms) && motion_master_ && from == *motion_master_;
+    case MessageType::OverrideClaim:
+      return role_ == SyncRole::Coordinator;
+    case MessageType::ChannelMoved: {
+      const ChannelMoved* moved = std::get_if<ChannelMoved>(&message.body);
+      return role_ == SyncRole::Member && moved != nullptr && moved->channel >= 1 &&
+             moved->channel <= kLastWifiChannel;
+    }
+    default:
+      return false;
+  }
+}
+
+bool GroupSync::on_member_report(const Message& message, const Mac& from, uint32_t now_ms) {
+  if (!wants_report(message, from, now_ms)) return false;
   if (!verify(message, secret_)) return false;
   if (message.group_id != group_id_) return false;
   if (from == self_ || std::find(members_.begin(), members_.end(), from) == members_.end()) return false;
@@ -150,6 +213,7 @@ bool GroupSync::on_member_report(const Message& message, const Mac& from) {
   } else {
     last_report_.push_back({from, message.auth});
   }
+  if (const ChannelMoved* moved = std::get_if<ChannelMoved>(&message.body)) home_channel_ = moved->channel;
   return true;
 }
 
@@ -159,10 +223,14 @@ void GroupSync::regroup(uint32_t group_id, std::vector<Mac> members, const Group
   secret_ = secret;
   role_ = SyncRole::Undecided;
   seq_ = 0;
+  heartbeat_due_ = false;
+  master_report_.reset();
   sent_heartbeat_ = false;
   last_heartbeat_ms_ = 0;
   coordinator_.reset();
   heard_any_ = false;
+  keeping_open_ = false;
+  motion_master_.reset();
   coordinator_boot_ = 0;
   counter_known_ = false;
   last_counter_ = 0;
@@ -173,8 +241,8 @@ void GroupSync::regroup(uint32_t group_id, std::vector<Mac> members, const Group
 
 SyncRole GroupSync::role() const { return role_; }
 SyncRecord GroupSync::record() const {
-  if (role_ != SyncRole::Member) return {role_, std::nullopt, 0};
-  return {role_, coordinator_, coordinator_boot_};
+  if (role_ != SyncRole::Member) return {role_, std::nullopt, 0, home_channel_};
+  return {role_, coordinator_, coordinator_boot_, home_channel_};
 }
 bool GroupSync::matter_enabled() const { return role_ != SyncRole::Member; }
 const GroupState& GroupSync::state() const { return state_; }
@@ -182,13 +250,24 @@ uint32_t GroupSync::blink_phase_ms(uint32_t now_ms) const {
   return blink_clock_.phase_ms(now_ms, blink_period_ms(state_.look.blink_speed_pct));
 }
 uint32_t GroupSync::last_heard_ms() const { return last_heard_ms_; }
+bool GroupSync::silent(uint32_t now_ms) const {
+  if (role_ != SyncRole::Member || !coordinator_) return false;
+  return now_ms - last_heard_ms_ > kCoordinatorSilenceMs;
+}
+std::optional<Mac> GroupSync::motion_master() const { return motion_master_; }
 void GroupSync::on_commissioning(bool in_progress) { commissioning_ = in_progress; }
+uint8_t GroupSync::home() const { return home_channel_ != 0 ? home_channel_ : ESPNOW_PAIRING_CHANNEL; }
+std::optional<ChannelAnnouncement> GroupSync::channel_announcement() {
+  std::optional<ChannelAnnouncement> out = std::move(announcement_);
+  announcement_.reset();
+  return out;
+}
 uint8_t GroupSync::listen_channel(uint32_t now_ms) const {
   if (commissioning_ || role_ == SyncRole::Coordinator || members_.size() <= 1) return 0;
+  const uint8_t home = this->home();
   const uint32_t quiet = now_ms - last_heard_ms_;
-  if (quiet < kChannelHuntQuietMs) return 0;
-  const uint32_t hunting = quiet - kChannelHuntQuietMs;
-  return static_cast<uint8_t>(1 + (hunting / kChannelHuntDwellMs) % kChannelHuntLast);
+  if (quiet <= kCoordinatorSilenceMs) return home;
+  return scan_channel(home, quiet - kCoordinatorSilenceMs);
 }
 
 }  // namespace sls

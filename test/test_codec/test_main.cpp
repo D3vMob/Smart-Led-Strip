@@ -1,4 +1,5 @@
 #include <unity.h>
+#include <optional>
 #include <variant>
 #include "espnow_codec.h"
 
@@ -541,6 +542,7 @@ void test_state_wire_layout_matches_the_golden_bytes() {
   sync.seq = 0x01020304;
   sync.blink_phase_ms = 0x0A0B0C0D;
   sync.wifi_channel = 6;
+  sync.motion_master = sls::Mac{0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5};
 
   sls::Message message;
   message.type = sls::MessageType::State;
@@ -550,7 +552,7 @@ void test_state_wire_layout_matches_the_golden_bytes() {
   message.auth = sample_auth();
 
   const uint8_t expected[] = {
-      'S', 'L', 3, 1,                          // magic, version, type
+      'S', 'L', 4, 1,                          // magic, version, type
       0x44, 0x33, 0x22, 0x11,                  // group id, little-endian
       0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5,      // sender MAC
       0x01,                                    // color_mode
@@ -565,6 +567,8 @@ void test_state_wire_layout_matches_the_golden_bytes() {
       0x04, 0x03, 0x02, 0x01,                  // seq
       0x0D, 0x0C, 0x0B, 0x0A,                  // blink_phase_ms
       0x06,                                    // wifi_channel
+      0x01,                                    // motion_master present
+      0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5,      // motion_master MAC
       0x0D, 0xF0, 0xFE, 0xCA,                  // auth boot_count
       0x02, 0x01, 0x00, 0x00,                  // auth counter
       0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7,
@@ -594,12 +598,14 @@ void test_state_wire_layout_matches_the_golden_bytes() {
   TEST_ASSERT_EQUAL_UINT32(0x01020304, got->seq);
   TEST_ASSERT_EQUAL_UINT32(0x0A0B0C0D, got->blink_phase_ms);
   TEST_ASSERT_EQUAL_UINT8(6, got->wifi_channel);
+  TEST_ASSERT_TRUE(got->motion_master.has_value());
+  TEST_ASSERT_TRUE((sls::Mac{0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5}) == *got->motion_master);
 }
 
 void test_sync_messages_keep_their_auth_fields_across_encode_and_decode() {
   const sls::MessageType synced[] = {sls::MessageType::State, sls::MessageType::Heartbeat,
                                      sls::MessageType::MatterSilent, sls::MessageType::Presence,
-                                     sls::MessageType::OverrideClaim};
+                                     sls::MessageType::OverrideClaim, sls::MessageType::ChannelMoved};
   for (sls::MessageType type : synced) {
     sls::Message message = sample_message(type);
     message.auth = sample_auth();
@@ -618,7 +624,7 @@ void test_sync_messages_keep_their_auth_fields_across_encode_and_decode() {
 void test_sync_frame_one_byte_short_of_the_auth_trailer_is_rejected_as_truncated() {
   const sls::MessageType synced[] = {sls::MessageType::State, sls::MessageType::Heartbeat,
                                      sls::MessageType::MatterSilent, sls::MessageType::Presence,
-                                     sls::MessageType::OverrideClaim};
+                                     sls::MessageType::OverrideClaim, sls::MessageType::ChannelMoved};
   for (sls::MessageType type : synced) {
     uint8_t buf[sls::kMaxMessageBytes];
     size_t full = sls::encode(sample_message(type), buf, sizeof(buf));
@@ -628,19 +634,76 @@ void test_sync_frame_one_byte_short_of_the_auth_trailer_is_rejected_as_truncated
   }
 }
 
-void test_channel_moved_carries_no_auth_bytes() {
+void test_channel_moved_is_a_sync_message_that_keeps_its_auth_fields() {
+  TEST_ASSERT_TRUE(sls::is_sync_message(sls::MessageType::ChannelMoved));
+  sls::Message message = sample_message(sls::MessageType::ChannelMoved);
+  message.auth = sample_auth();
   uint8_t buf[sls::kMaxMessageBytes];
-  TEST_ASSERT_EQUAL_UINT32(14 + 1, sls::encode(sample_message(sls::MessageType::ChannelMoved), buf, sizeof(buf)));
+  size_t n = sls::encode(message, buf, sizeof(buf));
+  TEST_ASSERT_EQUAL_UINT32(14 + 1 + 24, n);
+  sls::Decoded decoded = sls::decode(buf, n, 0x12345678);
+  TEST_ASSERT_TRUE(decoded.ok);
+  TEST_ASSERT_EQUAL_UINT32(0xCAFEF00D, decoded.message.auth.boot_count);
+  TEST_ASSERT_EQUAL_UINT32(0x102, decoded.message.auth.counter);
+  TEST_ASSERT_TRUE(message.auth.tag == decoded.message.auth.tag);
+}
+
+static sls::Message state_message_with_motion_master(sls::MessageType type, std::optional<sls::Mac> master) {
+  sls::Message message = sample_message(type);
+  std::get<sls::StateSync>(message.body).motion_master = master;
+  return message;
+}
+
+void test_state_and_heartbeat_round_trip_the_motion_master_when_set_and_when_none() {
+  const sls::MessageType types[] = {sls::MessageType::State, sls::MessageType::Heartbeat};
+  const sls::Mac master = {0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6};
+  for (sls::MessageType type : types) {
+    uint8_t buf[sls::kMaxMessageBytes];
+    size_t n = sls::encode(state_message_with_motion_master(type, master), buf, sizeof(buf));
+    TEST_ASSERT_GREATER_THAN(0, n);
+    sls::Decoded set = sls::decode(buf, n, 0x12345678);
+    TEST_ASSERT_TRUE(set.ok);
+    const sls::StateSync* got_set = std::get_if<sls::StateSync>(&set.message.body);
+    TEST_ASSERT_NOT_NULL(got_set);
+    TEST_ASSERT_TRUE(got_set->motion_master.has_value());
+    TEST_ASSERT_TRUE(master == *got_set->motion_master);
+
+    n = sls::encode(state_message_with_motion_master(type, std::nullopt), buf, sizeof(buf));
+    TEST_ASSERT_GREATER_THAN(0, n);
+    sls::Decoded none = sls::decode(buf, n, 0x12345678);
+    TEST_ASSERT_TRUE(none.ok);
+    const sls::StateSync* got_none = std::get_if<sls::StateSync>(&none.message.body);
+    TEST_ASSERT_NOT_NULL(got_none);
+    TEST_ASSERT_FALSE(got_none->motion_master.has_value());
+  }
+}
+
+void test_presence_round_trips_the_senders_group_open_state() {
+  const bool opens[] = {true, false};
+  for (bool open : opens) {
+    sls::Message message = sample_message(sls::MessageType::Presence);
+    std::get<sls::Presence>(message.body).open = open;
+    uint8_t buf[sls::kMaxMessageBytes];
+    size_t n = sls::encode(message, buf, sizeof(buf));
+    TEST_ASSERT_GREATER_THAN(0, n);
+    sls::Decoded decoded = sls::decode(buf, n, 0x12345678);
+    TEST_ASSERT_TRUE(decoded.ok);
+    const sls::Presence* got = std::get_if<sls::Presence>(&decoded.message.body);
+    TEST_ASSERT_NOT_NULL(got);
+    TEST_ASSERT_EQUAL(open, got->open);
+  }
 }
 
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_state_message_round_trips_with_every_field_intact);
+  RUN_TEST(test_state_and_heartbeat_round_trip_the_motion_master_when_set_and_when_none);
   RUN_TEST(test_sync_messages_keep_their_auth_fields_across_encode_and_decode);
   RUN_TEST(test_sync_frame_one_byte_short_of_the_auth_trailer_is_rejected_as_truncated);
-  RUN_TEST(test_channel_moved_carries_no_auth_bytes);
+  RUN_TEST(test_channel_moved_is_a_sync_message_that_keeps_its_auth_fields);
   RUN_TEST(test_heartbeat_message_round_trips_with_every_field_intact);
   RUN_TEST(test_presence_message_round_trips_onset_and_absence);
+  RUN_TEST(test_presence_round_trips_the_senders_group_open_state);
   RUN_TEST(test_pairing_hello_and_ack_decode_for_unpaired_unit);
   RUN_TEST(test_state_message_for_another_group_is_rejected_as_wrong_group);
   RUN_TEST(test_override_claim_channel_moved_and_matter_silent_round_trip);

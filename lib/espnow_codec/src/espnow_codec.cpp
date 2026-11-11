@@ -12,14 +12,14 @@ constexpr size_t kTypeOffset = 3;
 constexpr size_t kGroupOffset = 4;
 constexpr size_t kSenderOffset = 8;
 constexpr size_t kHeaderBytes = kSenderOffset + 6;
-constexpr size_t kPresenceBodyBytes = 1 + 4;
+constexpr size_t kPresenceBodyBytes = 1 + 4 + 1;
 constexpr size_t kChannelMovedBodyBytes = 1;
 // Pairing body: window age (4), member count (1) and nonce (16), then 6 bytes per member.
 constexpr size_t kPairingCountOffset = 4;
 constexpr size_t kPairingNonceOffset = 5;
 constexpr size_t kPairingFixedBodyBytes = kPairingNonceOffset + kPairingNonceBytes;
 constexpr size_t kMacBytes = 6;
-constexpr size_t kStateBodyBytes = 1 + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + 4 + 4 + 1;
+constexpr size_t kStateBodyBytes = 1 + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + 4 + 4 + 1 + 1 + 6;
 
 constexpr size_t kAuthBytes = 4 + 4 + kSyncTagBytes;
 
@@ -78,6 +78,8 @@ void put_state_body(uint8_t* b, const StateSync& sync) {
   put32(b + 11, sync.seq);
   put32(b + 15, sync.blink_phase_ms);
   b[19] = sync.wifi_channel;
+  b[20] = sync.motion_master.has_value() ? 1 : 0;
+  for (size_t i = 0; i < kMacBytes; ++i) b[21 + i] = sync.motion_master ? (*sync.motion_master)[i] : 0;
 }
 
 // Body bytes of a State/Heartbeat message hold values the receiver can safely apply:
@@ -104,6 +106,11 @@ StateSync get_state_body(const uint8_t* b) {
   sync.seq = get32(b + 11);
   sync.blink_phase_ms = get32(b + 15);
   sync.wifi_channel = b[19];
+  if (b[20] != 0) {
+    Mac master;
+    for (size_t i = 0; i < kMacBytes; ++i) master[i] = b[21 + i];
+    sync.motion_master = master;
+  }
   return sync;
 }
 
@@ -159,6 +166,7 @@ size_t encode(const Message& message, uint8_t* out, size_t capacity) {
     case MessageType::Presence:
       b[0] = presence->present ? 1 : 0;
       put32(b + 1, presence->total_presence_ms);
+      b[5] = presence->open ? 1 : 0;
       break;
     case MessageType::ChannelMoved:
       b[0] = moved->channel;
@@ -251,7 +259,7 @@ Decoded decode(const uint8_t* buf, size_t len, uint32_t my_group_id) {
       result.message.body = get_state_body(b);
       break;
     case MessageType::Presence:
-      result.message.body = Presence{b[0] != 0, get32(b + 1)};
+      result.message.body = Presence{b[0] != 0, get32(b + 1), b[5] != 0};
       break;
     case MessageType::ChannelMoved:
       result.message.body = ChannelMoved{b[0]};
