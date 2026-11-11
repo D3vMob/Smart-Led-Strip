@@ -2,7 +2,7 @@
 
 namespace sls {
 
-MotionFeed::MotionFeed(uint32_t absence_ms) : rules_(absence_ms) {}
+MotionFeed::MotionFeed(uint32_t absence_ms) : absence_ms_(absence_ms), rules_(absence_ms) {}
 
 MotionIntent MotionFeed::feed(bool motion_enabled, std::optional<bool> presence, uint32_t now_ms) {
   if (motion_enabled != motion_enabled_) {
@@ -26,6 +26,8 @@ void MotionFeed::forget_presence() {
 }
 
 void MotionFeed::seed_next() {
+  rules_ = MotionRules(absence_ms_);
+  motion_enabled_ = false;
   last_presence_.reset();
   seeding_ = true;
 }
