@@ -30,6 +30,8 @@ constexpr uint32_t kPresenceKeepaliveMs = 2000;
 // The confirmation after a double-press: two white flashes, 150 ms on and 150 ms off.
 constexpr uint32_t kFlashHalfPeriodMs = 150;
 constexpr uint32_t kFlashTotalMs = 600;
+// Longest wait for announcements to leave the radio before it changes channel.
+constexpr uint32_t kChannelAnnounceFlushMs = 100;
 
 StripOutput strip(LED_COUNT, LED_DATA_PIN, LED_PIXEL_TYPE, MAX_MILLIAMPS);
 Ld2410Uart sensor(Serial1, LD2410_RX_PIN, LD2410_TX_PIN, LD2410_DETECT_TIMEOUT_MS);
@@ -61,6 +63,8 @@ std::optional<sls::Mac> reported_master;
 std::optional<bool> reported_motion_presence;
 sls::MotionRules motion_rules;
 bool rules_motion_enabled = false;
+// Member side, while the Coordinator is silent: the Motion master's latest presence level.
+std::optional<bool> member_presence;
 
 void report_sensor_status(uint32_t now_ms) {
   SensorStatus status = sensor.status(now_ms);
@@ -157,6 +161,23 @@ void run_motion_rules(uint32_t now_ms) {
   save_motion_master_if_changed();
 }
 
+// A silent Member follows motion locally: the same rules the Coordinator runs, fed by the Motion
+// master's Presence reports (or this Unit's own sensor when it is the master).
+void run_member_motion_rules(uint32_t now_ms) {
+  if (group_sync->motion_master() == self_mac && sensor.status(now_ms) == SensorStatus::Sensor) {
+    member_presence = sensor_present;
+  }
+  if (group_state.motion_enabled != rules_motion_enabled) {
+    rules_motion_enabled = group_state.motion_enabled;
+    motion_rules.on_motion_enabled(rules_motion_enabled, now_ms);
+  }
+  if (member_presence && member_presence != reported_motion_presence) {
+    apply_motion_intent(motion_rules.on_presence(*member_presence, now_ms));
+  }
+  reported_motion_presence = member_presence;
+  apply_motion_intent(motion_rules.on_tick(now_ms));
+}
+
 bool same_look(const sls::Look& a, const sls::Look& b) {
   return a.color_mode == b.color_mode && a.hue_deg == b.hue_deg && a.saturation == b.saturation &&
          a.color_temp_mireds == b.color_temp_mireds && a.brightness_pct == b.brightness_pct &&
@@ -168,7 +189,7 @@ void send_presence_report(uint32_t now_ms) {
   if (runs_election()) {
     if (motion_master) motion_master->on_presence_report(self_mac, sensor_present, total_presence_ms, now_ms);
   } else {
-    espnow.send_all(group_sync->report_presence(sensor_present, total_presence_ms));
+    espnow.send_all(group_sync->report_presence(sensor_present, total_presence_ms, group_state.open, now_ms));
   }
   sent_level = sensor_present;
   last_presence_sent_ms = now_ms;
@@ -217,11 +238,34 @@ bool render_confirmation(uint32_t now_ms) {
   return true;
 }
 
+// Saves the role, Coordinator, Coordinator boot and home channel when they differ from what is in flash.
+void save_record_if_changed() {
+  const sls::SyncRecord record = group_sync->record();
+  if (record.role == saved_record.role && record.coordinator == saved_record.coordinator &&
+      record.coordinator_boot == saved_record.coordinator_boot && record.channel == saved_record.channel) {
+    return;
+  }
+  save_sync_record(record);
+  saved_record = record;
+}
+
 // A Presence or OverrideClaim from a Sensor unit, for the Unit that runs the election.
 void handle_member_report(const sls::Message& message, const sls::Mac& from, uint32_t now_ms) {
-  if (!motion_master || !group_sync->on_member_report(message, from)) return;
-  if (const sls::Presence* report = std::get_if<sls::Presence>(&message.body)) {
+  if (!group_sync->on_member_report(message, from, now_ms)) return;
+  const sls::Presence* report = std::get_if<sls::Presence>(&message.body);
+  if (!motion_master) {
+    // A Member: a Presence from the Motion master is only accepted while the Coordinator is silent.
+    if (report != nullptr) member_presence = report->present;
+    save_record_if_changed();  // a ChannelMoved changes the home channel
+    return;
+  }
+  if (report != nullptr) {
     motion_master->on_presence_report(message.sender, report->present, report->total_presence_ms, now_ms);
+    // The Coordinator returned and heard the Motion master: adopt its Open/Closed, the next local
+    // change check then sees no change and the Heartbeat carries it out.
+    if (group_sync->on_master_presence(message.sender, report->open, motion_master->master(), now_ms)) {
+      group_state.open = group_sync->state().open;
+    }
   } else if (message.type == sls::MessageType::OverrideClaim) {
     motion_master->on_override(message.sender, now_ms);
   }
@@ -246,27 +290,22 @@ void build_group_sync() {
                                                 pairing->group_secret(), saved_record, boot_count, group_state);
 }
 
-// Saves the role, Coordinator and Coordinator boot when they differ from what is in flash.
-void save_record_if_changed() {
-  const sls::SyncRecord record = group_sync->record();
-  if (record.role == saved_record.role && record.coordinator == saved_record.coordinator &&
-      record.coordinator_boot == saved_record.coordinator_boot) {
-    return;
-  }
-  save_sync_record(record);
-  saved_record = record;
+// A silent Member that found the Coordinator on a new channel tells the rest of the Group on the old
+// channel, waits for the sends to leave the radio, then moves to the new home channel.
+void announce_channel_move(uint32_t now_ms) {
+  const std::optional<sls::ChannelAnnouncement> announcement = group_sync->channel_announcement();
+  if (!announcement) return;
+  espnow.set_channel(announcement->old_channel);
+  espnow.send_all(announcement->messages);
+  espnow.flush(kChannelAnnounceFlushMs);
+  const uint8_t home = group_sync->listen_channel(now_ms);
+  espnow.set_channel(home != 0 ? home : group_sync->record().channel);
 }
 
 void handle_sync_message(const sls::Message& message, const sls::Mac& from, uint32_t now_ms) {
   const sls::SyncRole before = group_sync->role();
   const bool applied = group_sync->on_message(message, from, now_ms);
-  const sls::StateSync* sync = std::get_if<sls::StateSync>(&message.body);
-  // The channel comes off the air, so never trust it beyond the channels hunted.
-  if (applied && message.type == sls::MessageType::Heartbeat && sync != nullptr &&
-      group_sync->role() == sls::SyncRole::Member && sync->wifi_channel >= 1 &&
-      sync->wifi_channel <= sls::kChannelHuntLast) {
-    espnow.set_channel(sync->wifi_channel);
-  }
+  if (applied) announce_channel_move(now_ms);
   save_record_if_changed();
   if (before != sls::SyncRole::Member && group_sync->role() == sls::SyncRole::Member) {
     if (matter_started) {
@@ -348,7 +387,8 @@ void loop() {
   sls::Message message;
   sls::Mac from;
   while (espnow.poll(message, from, pairing->group_id())) {
-    if (message.type == sls::MessageType::Presence || message.type == sls::MessageType::OverrideClaim) {
+    if (message.type == sls::MessageType::Presence || message.type == sls::MessageType::OverrideClaim ||
+        message.type == sls::MessageType::ChannelMoved) {
       handle_member_report(message, from, now_ms);
       continue;
     }
@@ -391,10 +431,17 @@ void loop() {
     }
     run_motion_rules(now_ms);
   } else {
-    group_state = group_sync->state();  // the Coordinator owns the state
+    if (group_sync->silent(now_ms)) {
+      run_member_motion_rules(now_ms);  // no Coordinator: follow motion locally
+    } else {
+      member_presence.reset();
+      reported_motion_presence.reset();
+      group_state = group_sync->state();  // the Coordinator owns the state
+    }
   }
   espnow.send_all(group_sync->on_local_change(group_state, now_ms));
-  espnow.send_all(group_sync->on_tick(now_ms, WiFi.channel()));
+  espnow.send_all(group_sync->on_tick(now_ms, WiFi.channel(),
+                                          motion_master ? motion_master->master() : std::nullopt));
   scheduler.on_change(group_state, now_ms);
   if (scheduler.due(now_ms)) {
     save_group_state(group_state);

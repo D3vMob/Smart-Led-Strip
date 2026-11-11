@@ -39,6 +39,12 @@ void on_receive(const esp_now_recv_info_t* recv_info, const uint8_t* data, int l
   ring_head = next;
 }
 
+volatile uint8_t pending_sends = 0;
+
+void on_sent(const esp_now_send_info_t*, esp_now_send_status_t) {
+  if (pending_sends > 0) pending_sends = pending_sends - 1;
+}
+
 }  // namespace
 
 void EspNowLink::begin() {
@@ -55,6 +61,7 @@ void EspNowLink::begin() {
   broadcast.encrypt = false;
   esp_now_add_peer(&broadcast);
   esp_now_register_recv_cb(on_receive);
+  esp_now_register_send_cb(on_sent);
 }
 
 bool EspNowLink::add_peer(const sls::Mac& mac, bool encrypted) {
@@ -85,7 +92,7 @@ void EspNowLink::send(const sls::Mac& to, const sls::Message& message) {
   uint8_t buffer[sls::kMaxMessageBytes];
   const size_t length = sls::encode(message, buffer, sizeof(buffer));
   if (length == 0) return;
-  esp_now_send(to.data(), buffer, length);
+  if (esp_now_send(to.data(), buffer, length) == ESP_OK) pending_sends = pending_sends + 1;
 }
 
 void EspNowLink::send_all(const std::vector<sls::Outgoing>& outgoing) {
@@ -129,4 +136,9 @@ sls::Mac EspNowLink::self_mac() const {
   sls::Mac mac = {};
   esp_read_mac(mac.data(), ESP_MAC_WIFI_STA);
   return mac;
+}
+
+void EspNowLink::flush(uint32_t timeout_ms) {
+  const uint32_t start = millis();
+  while (pending_sends > 0 && millis() - start < timeout_ms) delay(1);
 }
