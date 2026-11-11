@@ -23,11 +23,6 @@ constexpr size_t kStateBodyBytes = 1 + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + 4 + 4 + 1
 
 constexpr size_t kAuthBytes = 4 + 4 + kSyncTagBytes;
 
-bool carries_auth(MessageType type) {
-  return type == MessageType::State || type == MessageType::Heartbeat ||
-         type == MessageType::MatterSilent;
-}
-
 constexpr int kUnknownType = -1;
 
 // Body size in bytes for a message type, or kUnknownType when the type is unknown.
@@ -145,7 +140,7 @@ size_t encode(const Message& message, uint8_t* out, size_t capacity) {
       if (!std::holds_alternative<std::monostate>(message.body)) return 0;
       break;
   }
-  if (carries_auth(message.type)) total += kAuthBytes;
+  if (is_sync_message(message.type)) total += kAuthBytes;
   if (capacity < total) return 0;
 
   out[0] = kMagic[0];
@@ -183,7 +178,7 @@ size_t encode(const Message& message, uint8_t* out, size_t capacity) {
     case MessageType::MatterSilent:
       break;
   }
-  if (carries_auth(message.type)) {
+  if (is_sync_message(message.type)) {
     uint8_t* a = out + total - kAuthBytes;
     put32(a, message.auth.boot_nonce);
     put32(a + 4, message.auth.counter);
@@ -232,7 +227,7 @@ Decoded decode(const uint8_t* buf, size_t len, uint32_t my_group_id) {
     }
     body_size += kMacBytes * count;
   }
-  if (carries_auth(type)) body_size += kAuthBytes;
+  if (is_sync_message(type)) body_size += kAuthBytes;
   if (len < kHeaderBytes + body_size) {
     result.error = DecodeError::Truncated;
     return result;
@@ -280,7 +275,7 @@ Decoded decode(const uint8_t* buf, size_t len, uint32_t my_group_id) {
       result.message.body = std::monostate{};
       break;
   }
-  if (carries_auth(type)) {
+  if (is_sync_message(type)) {
     const uint8_t* a = buf + len - kAuthBytes;
     result.message.auth.boot_nonce = get32(a);
     result.message.auth.counter = get32(a + 4);

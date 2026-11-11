@@ -27,6 +27,11 @@ enum class MessageType : uint8_t {
   MatterSilent
 };
 
+// Group sync messages: the ones that carry a SyncAuth trailer and are signed with the Group secret.
+constexpr bool is_sync_message(MessageType type) {
+  return type == MessageType::State || type == MessageType::Heartbeat || type == MessageType::MatterSilent;
+}
+
 struct StateSync {
   GroupState state;
   uint32_t seq;

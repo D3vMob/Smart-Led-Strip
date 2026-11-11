@@ -168,8 +168,7 @@ void loop() {
   sls::Message message;
   sls::Mac from;
   while (espnow.poll(message, from, pairing->group_id())) {
-    if (message.type == sls::MessageType::State || message.type == sls::MessageType::Heartbeat ||
-        message.type == sls::MessageType::MatterSilent) {
+    if (sls::is_sync_message(message.type)) {
       handle_sync_message(message, from, now_ms);
       continue;
     }

@@ -99,9 +99,6 @@ bool GroupSync::on_message(const Message& message, const Mac& from, uint32_t now
   if (from != message.sender) return false;  // the radio source must be the claimed sender
   if (role_ == SyncRole::Coordinator) return false;  // the Coordinator owns the Group state
   if (coordinator_ && *coordinator_ != from) return false;  // only the Coordinator we follow
-  if (message.type != MessageType::MatterSilent && message.type != MessageType::State &&
-      message.type != MessageType::Heartbeat)
-    return false;
   if (message.type != MessageType::MatterSilent && !std::get_if<StateSync>(&message.body)) return false;
   if (!freshness_.accept(message.auth)) return false;  // a replayed or earlier-boot frame: no effect at all
   if (message.type == MessageType::MatterSilent) {

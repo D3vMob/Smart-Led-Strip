@@ -14,7 +14,7 @@ namespace sls {
 
 // Undecided: not commissioned yet, Matter-capable. Coordinator: the one Member
 // commissioned into Matter; owns the Group state. Member: Matter-silent, follows
-// the Coordinator. Saved in flash (see SyncRecord); it only changes again when the Unit is erased.
+// the Coordinator. Saved in flash (see SyncRecord); it only changes again on re-pairing or a flash erase.
 enum class SyncRole : uint8_t { Undecided, Coordinator, Member };
 
 // What a Unit saves in flash about its place in the Group: its role and, on a Member, the Coordinator it follows.

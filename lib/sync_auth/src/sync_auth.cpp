@@ -130,10 +130,6 @@ namespace sls {
 
 namespace {
 
-bool is_sync_type(MessageType type) {
-  return type == MessageType::MatterSilent || type == MessageType::State || type == MessageType::Heartbeat;
-}
-
 // First kSyncTagBytes of the HMAC over the frame encoded with a zeroed tag; false if it cannot be encoded.
 bool compute_tag(const Message& message, const GroupSecret& secret, std::array<uint8_t, kSyncTagBytes>& tag) {
   Message copy = message;
@@ -149,13 +145,13 @@ bool compute_tag(const Message& message, const GroupSecret& secret, std::array<u
 }  // namespace
 
 void sign(Message& message, const GroupSecret& secret) {
-  if (!is_sync_type(message.type)) return;
+  if (!is_sync_message(message.type)) return;
   std::array<uint8_t, kSyncTagBytes> tag{};
   if (compute_tag(message, secret, tag)) message.auth.tag = tag;
 }
 
 bool verify(const Message& message, const GroupSecret& secret) {
-  if (!is_sync_type(message.type)) return false;
+  if (!is_sync_message(message.type)) return false;
   std::array<uint8_t, kSyncTagBytes> expected{};
   if (!compute_tag(message, secret, expected)) return false;
   uint8_t diff = 0;
