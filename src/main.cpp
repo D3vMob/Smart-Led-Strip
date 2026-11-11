@@ -421,7 +421,7 @@ void loop() {
       run_member_motion_rules(now_ms);  // no Coordinator: follow motion locally
     } else {
       member_presence.reset();
-      motion_feed.seed_next();
+      motion_feed.seed_next(!group_sync->state().open);
       group_state = group_sync->state();  // the Coordinator owns the state
     }
   }

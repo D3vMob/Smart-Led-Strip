@@ -13,7 +13,9 @@ MotionIntent MotionFeed::feed(bool motion_enabled, std::optional<bool> presence,
   if (presence && presence != last_presence_) {
     const MotionIntent arrival = rules_.on_presence(*presence, now_ms);
     if (!seeding_) intent = arrival;
+    if (seeding_ && seed_held_) rules_.on_manual_close();
     seeding_ = false;
+    seed_held_ = false;
   }
   last_presence_ = presence;
   const MotionIntent tick = rules_.on_tick(now_ms);
@@ -23,13 +25,15 @@ MotionIntent MotionFeed::feed(bool motion_enabled, std::optional<bool> presence,
 void MotionFeed::forget_presence() {
   last_presence_.reset();
   seeding_ = false;
+  seed_held_ = false;
 }
 
-void MotionFeed::seed_next() {
+void MotionFeed::seed_next(bool held) {
   rules_ = MotionRules(absence_ms_);
   motion_enabled_ = false;
   last_presence_.reset();
   seeding_ = true;
+  seed_held_ = held;
 }
 
 void MotionFeed::on_manual_close() { rules_.on_manual_close(); }

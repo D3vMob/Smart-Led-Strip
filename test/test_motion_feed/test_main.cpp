@@ -76,6 +76,16 @@ void test_seeded_absence_after_earlier_absent_silence_waits_full_timeout() {
   TEST_ASSERT_EQUAL(sls::MotionIntent::Close, feed.feed(true, false, later + ABSENCE_MS));
 }
 
+void test_seeded_presence_while_closed_holds_through_brief_absence() {
+  sls::MotionFeed feed;
+  feed.feed(true, std::nullopt, 0);
+  feed.seed_next(true);
+  feed.feed(true, true, 1000);
+  feed.feed(true, false, 2000);
+  TEST_ASSERT_EQUAL(static_cast<int>(sls::MotionIntent::None),
+                    static_cast<int>(feed.feed(true, true, 3000)));
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_first_presence_opens_strip_while_motion_enabled);
@@ -84,6 +94,7 @@ int main() {
   RUN_TEST(test_seeded_absence_closes_strip_after_timeout);
   RUN_TEST(test_seeding_forgets_absence_pending_from_earlier_silence);
   RUN_TEST(test_seeded_absence_after_earlier_absent_silence_waits_full_timeout);
+  RUN_TEST(test_seeded_presence_while_closed_holds_through_brief_absence);
   RUN_TEST(test_repeated_presence_does_not_open_again);
   RUN_TEST(test_repeated_presence_after_manual_close_does_not_reopen);
   RUN_TEST(test_enabling_motion_with_room_already_empty_closes_after_timeout);

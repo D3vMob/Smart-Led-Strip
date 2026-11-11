@@ -17,8 +17,9 @@ class MotionFeed {
   void forget_presence();
   // Starts the next silence from fresh motion rules (no pending absence or hold carried over). The
   // next known presence only sets where the room stands in the rules and neither opens nor closes
-  // by itself; later changes do.
-  void seed_next();
+  // by itself; later changes do. `held` says the Group is Closed as the silence begins: a seeding
+  // presence then counts as a manual-close hold, so a brief step out and back in does not reopen.
+  void seed_next(bool held = false);
   void on_manual_close();
   void on_explicit_open();
 
@@ -28,6 +29,7 @@ class MotionFeed {
   bool motion_enabled_ = false;
   std::optional<bool> last_presence_;
   bool seeding_ = false;
+  bool seed_held_ = false;
 };
 
 }  // namespace sls
