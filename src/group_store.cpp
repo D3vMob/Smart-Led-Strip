@@ -16,6 +16,8 @@ constexpr const char* kSecretKey = "secret";
 constexpr const char* kCoordinatorBootKey = "coordboot";
 constexpr const char* kBootCountKey = "bootcount";
 constexpr const char* kMotionNamespace = "motion";
+constexpr const char* kMotionRecordKey = "record";
+constexpr size_t kMaxMotionRecordBytes = 256;
 constexpr size_t kMacBytes = sizeof(sls::Mac);
 
 }  // namespace
@@ -121,6 +123,30 @@ void clear_motion_master_keys() {
   Preferences preferences;
   if (preferences.begin(kMotionNamespace, false)) {
     preferences.clear();
+    preferences.end();
+  }
+}
+
+std::optional<sls::MotionMasterRecord> load_motion_master_record() {
+  std::optional<sls::MotionMasterRecord> record;
+  Preferences preferences;
+  if (!preferences.begin(kMotionNamespace, true)) return record;
+  const size_t length = preferences.getBytesLength(kMotionRecordKey);
+  if (length > 0 && length <= kMaxMotionRecordBytes) {
+    uint8_t buffer[kMaxMotionRecordBytes];
+    if (preferences.getBytes(kMotionRecordKey, buffer, sizeof(buffer)) == length) {
+      record = sls::decode_motion_master_record(buffer, length);
+    }
+  }
+  preferences.end();
+  return record;
+}
+
+void save_motion_master_record(const sls::MotionMasterRecord& record) {
+  const std::vector<uint8_t> bytes = sls::encode_motion_master_record(record);
+  Preferences preferences;
+  if (preferences.begin(kMotionNamespace, false)) {
+    preferences.putBytes(kMotionRecordKey, bytes.data(), bytes.size());
     preferences.end();
   }
 }
