@@ -15,15 +15,26 @@ bool same_state(const GroupState& a, const GroupState& b) {
 }
 }  // namespace
 
-GroupSync::GroupSync(const Mac& self, uint32_t group_id, std::vector<Mac> members, SyncRole persisted, const GroupState& initial)
-    : self_(self), group_id_(group_id), members_(std::move(members)), role_(persisted), state_(initial) {}
+GroupSync::GroupSync(const Mac& self, uint32_t group_id, std::vector<Mac> members, const GroupSecret& secret,
+                     const SyncRecord& persisted, uint32_t boot_nonce, const GroupState& initial)
+    : self_(self),
+      group_id_(group_id),
+      members_(std::move(members)),
+      secret_(secret),
+      boot_nonce_(boot_nonce),
+      role_(persisted.role),
+      state_(initial),
+      coordinator_(persisted.role == SyncRole::Member ? persisted.coordinator : std::nullopt) {}
 
-std::vector<Outgoing> GroupSync::to_other_members(MessageType type, const StateSync* sync) const {
+std::vector<Outgoing> GroupSync::to_other_members(MessageType type, const StateSync* sync) {
   std::vector<Outgoing> out;
   for (const Mac& member : members_) {
     if (member == self_) continue;
     Message message{type, group_id_, self_, std::monostate{}};
     if (sync != nullptr) message.body = *sync;
+    message.auth.boot_nonce = boot_nonce_;
+    message.auth.counter = ++counter_;
+    sign(message, secret_);
     out.push_back({member, message});
   }
   return out;
@@ -62,21 +73,43 @@ void GroupSync::realign_blink(const StateSync& sync, uint32_t now_ms) {
   if (drift > kBlinkRealignMs) blink_clock_.align(now_ms, theirs);
 }
 
+bool GroupSync::Freshness::accept(const SyncAuth& auth) {
+  if (!nonce_known || auth.boot_nonce == current_nonce) {
+    if (nonce_known && !seq_is_newer(auth.counter, last_counter)) return false;
+    nonce_known = true;
+    current_nonce = auth.boot_nonce;
+    last_counter = auth.counter;
+    return true;
+  }
+  const auto retired_end = retired.begin() + retired_count;
+  if (std::find(retired.begin(), retired_end, auth.boot_nonce) != retired_end) return false;
+  retired[retired_next] = current_nonce;  // the Coordinator rebooted: its previous boot is over
+  retired_next = (retired_next + 1) % kRetiredNonces;
+  if (retired_count < kRetiredNonces) ++retired_count;
+  current_nonce = auth.boot_nonce;
+  last_counter = auth.counter;
+  return true;
+}
+
 bool GroupSync::on_message(const Message& message, const Mac& from, uint32_t now_ms) {
+  if (!verify(message, secret_)) return false;  // forged, corrupted or unsigned: no effect at all
   if (members_.size() <= 1) return false;  // a Unit alone in its Group has no one to sync with
   if (message.group_id != group_id_) return false;
   if (from == self_ || std::find(members_.begin(), members_.end(), from) == members_.end()) return false;
   if (from != message.sender) return false;  // the radio source must be the claimed sender
   if (role_ == SyncRole::Coordinator) return false;  // the Coordinator owns the Group state
   if (coordinator_ && *coordinator_ != from) return false;  // only the Coordinator we follow
+  if (message.type != MessageType::MatterSilent && message.type != MessageType::State &&
+      message.type != MessageType::Heartbeat)
+    return false;
+  if (message.type != MessageType::MatterSilent && !std::get_if<StateSync>(&message.body)) return false;
+  if (!freshness_.accept(message.auth)) return false;  // a replayed or earlier-boot frame: no effect at all
   if (message.type == MessageType::MatterSilent) {
     coordinator_ = from;
     role_ = SyncRole::Member;
     return true;
   }
-  if (message.type != MessageType::State && message.type != MessageType::Heartbeat) return false;
   const StateSync* sync = std::get_if<StateSync>(&message.body);
-  if (!sync) return false;
   coordinator_ = from;
   role_ = SyncRole::Member;  // hearing the Coordinator settles an Undecided Unit
   last_heard_ms_ = now_ms;
@@ -94,7 +127,23 @@ bool GroupSync::on_message(const Message& message, const Mac& from, uint32_t now
   return true;
 }
 
+void GroupSync::regroup(uint32_t group_id, std::vector<Mac> members, const GroupSecret& secret) {
+  group_id_ = group_id;
+  members_ = std::move(members);
+  secret_ = secret;
+  role_ = SyncRole::Undecided;
+  seq_ = 0;
+  sent_heartbeat_ = false;
+  last_heartbeat_ms_ = 0;
+  coordinator_.reset();
+  heard_any_ = false;
+  freshness_ = {};
+  last_seq_ = 0;
+  last_heard_ms_ = 0;
+}
+
 SyncRole GroupSync::role() const { return role_; }
+SyncRecord GroupSync::record() const { return {role_, role_ == SyncRole::Member ? coordinator_ : std::nullopt}; }
 bool GroupSync::matter_enabled() const { return role_ != SyncRole::Member; }
 const GroupState& GroupSync::state() const { return state_; }
 uint32_t GroupSync::blink_phase_ms(uint32_t now_ms) const {

@@ -14,11 +14,19 @@ constexpr size_t kSenderOffset = 8;
 constexpr size_t kHeaderBytes = kSenderOffset + 6;
 constexpr size_t kPresenceBodyBytes = 1 + 4;
 constexpr size_t kChannelMovedBodyBytes = 1;
-// Pairing body: window age (4) and member count (1), then 6 bytes per member.
-constexpr size_t kPairingFixedBodyBytes = 4 + 1;
+// Pairing body: window age (4), member count (1) and nonce (16), then 6 bytes per member.
 constexpr size_t kPairingCountOffset = 4;
+constexpr size_t kPairingNonceOffset = 5;
+constexpr size_t kPairingFixedBodyBytes = kPairingNonceOffset + kPairingNonceBytes;
 constexpr size_t kMacBytes = 6;
 constexpr size_t kStateBodyBytes = 1 + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + 4 + 4 + 1;
+
+constexpr size_t kAuthBytes = 4 + 4 + kSyncTagBytes;
+
+bool carries_auth(MessageType type) {
+  return type == MessageType::State || type == MessageType::Heartbeat ||
+         type == MessageType::MatterSilent;
+}
 
 constexpr int kUnknownType = -1;
 
@@ -137,6 +145,7 @@ size_t encode(const Message& message, uint8_t* out, size_t capacity) {
       if (!std::holds_alternative<std::monostate>(message.body)) return 0;
       break;
   }
+  if (carries_auth(message.type)) total += kAuthBytes;
   if (capacity < total) return 0;
 
   out[0] = kMagic[0];
@@ -163,6 +172,7 @@ size_t encode(const Message& message, uint8_t* out, size_t capacity) {
     case MessageType::PairingAck:
       put32(b, pairing->window_age_ms);
       b[kPairingCountOffset] = static_cast<uint8_t>(pairing->members.size());
+      for (size_t i = 0; i < kPairingNonceBytes; ++i) b[kPairingNonceOffset + i] = pairing->nonce[i];
       for (size_t i = 0; i < pairing->members.size(); ++i) {
         for (size_t j = 0; j < kMacBytes; ++j) {
           b[kPairingFixedBodyBytes + i * kMacBytes + j] = pairing->members[i][j];
@@ -172,6 +182,12 @@ size_t encode(const Message& message, uint8_t* out, size_t capacity) {
     case MessageType::OverrideClaim:
     case MessageType::MatterSilent:
       break;
+  }
+  if (carries_auth(message.type)) {
+    uint8_t* a = out + total - kAuthBytes;
+    put32(a, message.auth.boot_nonce);
+    put32(a + 4, message.auth.counter);
+    for (size_t i = 0; i < kSyncTagBytes; ++i) a[8 + i] = message.auth.tag[i];
   }
   return total;
 }
@@ -216,6 +232,7 @@ Decoded decode(const uint8_t* buf, size_t len, uint32_t my_group_id) {
     }
     body_size += kMacBytes * count;
   }
+  if (carries_auth(type)) body_size += kAuthBytes;
   if (len < kHeaderBytes + body_size) {
     result.error = DecodeError::Truncated;
     return result;
@@ -249,6 +266,7 @@ Decoded decode(const uint8_t* buf, size_t len, uint32_t my_group_id) {
       PairingInfo info{};
       info.window_age_ms = get32(b);
       const size_t count = b[kPairingCountOffset];
+      for (size_t i = 0; i < kPairingNonceBytes; ++i) info.nonce[i] = b[kPairingNonceOffset + i];
       for (size_t i = 0; i < count; ++i) {
         Mac mac;
         for (size_t j = 0; j < kMacBytes; ++j) mac[j] = b[kPairingFixedBodyBytes + i * kMacBytes + j];
@@ -261,6 +279,12 @@ Decoded decode(const uint8_t* buf, size_t len, uint32_t my_group_id) {
     case MessageType::MatterSilent:
       result.message.body = std::monostate{};
       break;
+  }
+  if (carries_auth(type)) {
+    const uint8_t* a = buf + len - kAuthBytes;
+    result.message.auth.boot_nonce = get32(a);
+    result.message.auth.counter = get32(a + 4);
+    for (size_t i = 0; i < kSyncTagBytes; ++i) result.message.auth.tag[i] = a[8 + i];
   }
   result.ok = true;
   return result;

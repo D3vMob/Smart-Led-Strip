@@ -10,8 +10,9 @@
 namespace sls {
 
 constexpr size_t kMaxMessageBytes = 250;
-constexpr uint8_t kProtocolVersion = 1;
+constexpr uint8_t kProtocolVersion = 2;
 constexpr size_t kMaxGroupMembers = 8;
+constexpr size_t kSyncTagBytes = 16;
 
 using Mac = std::array<uint8_t, 6>;
 
@@ -42,9 +43,20 @@ struct ChannelMoved {
   uint8_t channel;
 };
 
+constexpr size_t kPairingNonceBytes = 16;
+using PairingNonce = std::array<uint8_t, kPairingNonceBytes>;
+
 struct PairingInfo {
   uint32_t window_age_ms;  // ms since the sender's first press of this pairing session
   std::vector<Mac> members;  // sender's member table, at most kMaxGroupMembers
+  PairingNonce nonce{};      // sender's random contribution to the Group secret
+};
+
+// Authentication trailer carried by MatterSilent, State and Heartbeat messages.
+struct SyncAuth {
+  uint32_t boot_nonce = 0;  // random per boot of the sender
+  uint32_t counter = 0;     // rises with every sync message the sender sends this boot
+  std::array<uint8_t, kSyncTagBytes> tag{};  // HMAC over the frame
 };
 
 struct Message {
@@ -52,6 +64,7 @@ struct Message {
   uint32_t group_id;
   Mac sender;
   std::variant<std::monostate, StateSync, Presence, ChannelMoved, PairingInfo> body;
+  SyncAuth auth{};  // only encoded for MatterSilent, State and Heartbeat
 };
 
 size_t encode(const Message& message, uint8_t* out, size_t capacity);

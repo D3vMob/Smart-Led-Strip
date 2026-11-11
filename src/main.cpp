@@ -2,6 +2,7 @@
 #include <WiFi.h>
 
 #include <memory>
+#include <optional>
 #include <variant>
 
 #include "blink.h"
@@ -32,6 +33,8 @@ sls::Mac self_mac = {};
 std::unique_ptr<sls::Pairing> pairing;
 std::unique_ptr<sls::GroupSync> group_sync;
 bool matter_started = false;
+uint32_t boot_nonce = 0;
+sls::SyncRecord saved_record;
 SensorStatus reported_status = SensorStatus::Probing;
 bool reported_present = false;
 
@@ -67,8 +70,18 @@ sls::Look pairing_look(uint32_t now_ms) {
   return look;
 }
 
-void build_group_sync(sls::SyncRole role) {
-  group_sync = std::make_unique<sls::GroupSync>(self_mac, pairing->group_id(), pairing->members(), role, group_state);
+void build_group_sync() {
+  saved_record = load_sync_record();
+  group_sync = std::make_unique<sls::GroupSync>(self_mac, pairing->group_id(), pairing->members(),
+                                                pairing->group_secret(), saved_record, boot_nonce, group_state);
+}
+
+// Saves the role and Coordinator when they differ from what is in flash.
+void save_record_if_changed() {
+  const sls::SyncRecord record = group_sync->record();
+  if (record.role == saved_record.role && record.coordinator == saved_record.coordinator) return;
+  save_sync_record(record);
+  saved_record = record;
 }
 
 void handle_sync_message(const sls::Message& message, const sls::Mac& from, uint32_t now_ms) {
@@ -81,8 +94,8 @@ void handle_sync_message(const sls::Message& message, const sls::Mac& from, uint
       sync->wifi_channel <= sls::kChannelHuntLast) {
     espnow.set_channel(sync->wifi_channel);
   }
+  save_record_if_changed();
   if (before != sls::SyncRole::Member && group_sync->role() == sls::SyncRole::Member) {
-    save_sync_role(sls::SyncRole::Member);
     if (matter_started) {
       Serial.println("Another Unit is the Coordinator: restarting to stay Matter-silent");
       ESP.restart();
@@ -97,12 +110,18 @@ void apply_pairing_actions(const sls::PairingActions& actions, uint32_t now_ms) 
   }
   if (actions.group_formed) {
     save_group_members(pairing->members());
+    save_group_secret(pairing->group_secret());
     clear_motion_master_keys();
     espnow.set_members(pairing->members(), self_mac);
-    build_group_sync(group_sync->role());
+    group_sync->regroup(pairing->group_id(), pairing->members(), pairing->group_secret());
+    save_record_if_changed();
     Serial.printf("Group formed: id %08x, %u member(s)\n",
                   static_cast<unsigned>(pairing->group_id()),
                   static_cast<unsigned>(pairing->members().size()));
+    if (!matter_started) {
+      Serial.println("Restarting so this Unit boots Matter-capable for the new Group");
+      ESP.restart();
+    }
   }
 }
 
@@ -118,9 +137,16 @@ void setup() {
   pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
   espnow.begin();
   self_mac = espnow.self_mac();
-  pairing = std::make_unique<sls::Pairing>(self_mac, load_group_members());
+  boot_nonce = esp_random();
+  const std::optional<sls::GroupSecret> secret = load_group_secret();
+  if (secret) {
+    pairing = std::make_unique<sls::Pairing>(self_mac, load_group_members(), *secret);
+  } else {
+    pairing = std::make_unique<sls::Pairing>(self_mac);
+    Serial.println("No Group secret saved: re-pair the Units to authenticate their sync");
+  }
   espnow.set_members(pairing->members(), self_mac);
-  build_group_sync(load_sync_role());
+  build_group_sync();
   if (group_sync->matter_enabled()) {
     matter_endpoints::begin(group_state);
     matter_started = true;
@@ -135,7 +161,9 @@ void loop() {
   if (sensor.poll(now_ms, presence)) report_presence(presence);
   report_sensor_status(now_ms);
   if (button.update(digitalRead(BOOT_BUTTON_PIN) == LOW, now_ms) == sls::Gesture::LongPress) {
-    apply_pairing_actions(pairing->on_long_press(now_ms), now_ms);
+    sls::PairingNonce nonce;
+    esp_fill_random(nonce.data(), nonce.size());
+    apply_pairing_actions(pairing->on_long_press(now_ms, nonce), now_ms);
   }
   sls::Message message;
   sls::Mac from;
@@ -168,7 +196,7 @@ void loop() {
     matter_endpoints::sync(group_state);
     if (matter_endpoints::commissioned() && group_sync->role() != sls::SyncRole::Coordinator) {
       espnow.send_all(group_sync->on_commissioned(now_ms));
-      save_sync_role(sls::SyncRole::Coordinator);
+      save_record_if_changed();
     }
   } else {
     group_state = group_sync->state();  // the Coordinator owns the state

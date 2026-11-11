@@ -11,6 +11,8 @@ namespace {
 constexpr const char* kNamespace = "group";
 constexpr const char* kKey = "members";
 constexpr const char* kRoleKey = "role";
+constexpr const char* kCoordinatorKey = "coord";
+constexpr const char* kSecretKey = "secret";
 constexpr const char* kMotionNamespace = "motion";
 constexpr size_t kMacBytes = sizeof(sls::Mac);
 
@@ -50,22 +52,52 @@ void save_group_members(const std::vector<sls::Mac>& members) {
   }
 }
 
-sls::SyncRole load_sync_role() {
-  sls::SyncRole role = sls::SyncRole::Undecided;
+std::optional<sls::GroupSecret> load_group_secret() {
+  std::optional<sls::GroupSecret> secret;
   Preferences preferences;
-  if (!preferences.begin(kNamespace, true)) return role;
-  const uint8_t stored = preferences.getUChar(kRoleKey, static_cast<uint8_t>(sls::SyncRole::Undecided));
-  if (stored <= static_cast<uint8_t>(sls::SyncRole::Member)) role = static_cast<sls::SyncRole>(stored);
+  if (!preferences.begin(kNamespace, true)) return secret;
+  sls::GroupSecret buffer;
+  if (preferences.getBytesLength(kSecretKey) == buffer.size() &&
+      preferences.getBytes(kSecretKey, buffer.data(), buffer.size()) == buffer.size()) {
+    secret = buffer;
+  }
   preferences.end();
-  return role;
+  return secret;
 }
 
-void save_sync_role(sls::SyncRole role) {
+void save_group_secret(const sls::GroupSecret& secret) {
   Preferences preferences;
   if (preferences.begin(kNamespace, false)) {
-    preferences.putUChar(kRoleKey, static_cast<uint8_t>(role));
+    preferences.putBytes(kSecretKey, secret.data(), secret.size());
     preferences.end();
   }
+}
+
+sls::SyncRecord load_sync_record() {
+  sls::SyncRecord record;
+  Preferences preferences;
+  if (!preferences.begin(kNamespace, true)) return record;
+  const uint8_t stored = preferences.getUChar(kRoleKey, static_cast<uint8_t>(sls::SyncRole::Undecided));
+  if (stored <= static_cast<uint8_t>(sls::SyncRole::Member)) record.role = static_cast<sls::SyncRole>(stored);
+  sls::Mac coordinator;
+  if (preferences.getBytesLength(kCoordinatorKey) == kMacBytes &&
+      preferences.getBytes(kCoordinatorKey, coordinator.data(), kMacBytes) == kMacBytes) {
+    record.coordinator = coordinator;
+  }
+  preferences.end();
+  return record;
+}
+
+void save_sync_record(const sls::SyncRecord& record) {
+  Preferences preferences;
+  if (!preferences.begin(kNamespace, false)) return;
+  preferences.putUChar(kRoleKey, static_cast<uint8_t>(record.role));
+  if (record.coordinator) {
+    preferences.putBytes(kCoordinatorKey, record.coordinator->data(), kMacBytes);
+  } else {
+    preferences.remove(kCoordinatorKey);
+  }
+  preferences.end();
 }
 
 void clear_motion_master_keys() {
