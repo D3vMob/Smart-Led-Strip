@@ -59,6 +59,11 @@ bool MotionMaster::silent(const Sensor& s) const {
 }
 
 const MotionMaster::Sensor* MotionMaster::find_master() const {
+  if (saved_.override_mac) {
+    for (const auto& s : sensors_) {
+      if (s.mac == *saved_.override_mac && s.heard) return &s;
+    }
+  }
   if (calibrating()) {
     const Sensor* lowest = nullptr;
     for (const auto& s : sensors_) {
@@ -84,6 +89,12 @@ std::optional<bool> MotionMaster::master_present() const {
   const Sensor* m = find_master();
   if (!m) return std::nullopt;
   return m->present;
+}
+
+std::optional<bool> MotionMaster::motion_presence() const {
+  if (sensors_.empty()) return std::nullopt;
+  const Sensor* m = find_master();
+  return m ? m->present : false;
 }
 
 std::vector<Mac> MotionMaster::sorted_by_score() const {

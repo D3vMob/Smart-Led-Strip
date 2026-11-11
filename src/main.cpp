@@ -58,7 +58,7 @@ std::unique_ptr<sls::MotionMaster> motion_master;
 bool motion_master_loaded = false;  // built from flash (Coordinator) rather than fresh in RAM
 sls::MotionMasterRecord saved_motion_record;
 std::optional<sls::Mac> reported_master;
-std::optional<bool> reported_master_present;
+std::optional<bool> reported_motion_presence;
 sls::MotionRules motion_rules;
 bool rules_motion_enabled = false;
 
@@ -110,7 +110,7 @@ void ensure_motion_master() {
   motion_master = std::make_unique<sls::MotionMaster>(saved_motion_record);
   motion_master_loaded = coordinator;
   reported_master.reset();
-  reported_master_present.reset();
+  reported_motion_presence.reset();
 }
 
 // Saves the Coordinator's record when more than the running presence totals changed.
@@ -148,11 +148,11 @@ void run_motion_rules(uint32_t now_ms) {
     rules_motion_enabled = group_state.motion_enabled;
     motion_rules.on_motion_enabled(rules_motion_enabled, now_ms);
   }
-  const std::optional<bool> master_present = motion_master->master_present();
-  if (master_present && master_present != reported_master_present) {
-    apply_motion_intent(motion_rules.on_presence(*master_present, now_ms));
+  const std::optional<bool> motion_presence = motion_master->motion_presence();
+  if (motion_presence && motion_presence != reported_motion_presence) {
+    apply_motion_intent(motion_rules.on_presence(*motion_presence, now_ms));
   }
-  reported_master_present = master_present;
+  reported_motion_presence = motion_presence;
   apply_motion_intent(motion_rules.on_tick(now_ms));
   save_motion_master_if_changed();
 }

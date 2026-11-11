@@ -205,15 +205,25 @@ void test_a_later_override_replaces_the_earlier_one() {
   TEST_ASSERT_TRUE(kLow == *mm.master());
 }
 
-void test_silent_override_fails_over_and_is_restored_when_it_reports_again() {
+void test_silent_override_stays_master_with_its_last_presence() {
   sls::MotionMaster mm;
   mm.on_presence_report(kLow, false, 0, 0);
   mm.on_override(kHigh, 0);
-  mm.on_presence_report(kLow, false, 0, 10000);
-  mm.on_tick(10001);
-  TEST_ASSERT_TRUE(kLow == *mm.master());
-  mm.on_presence_report(kHigh, false, 0, 10002);
+  mm.on_presence_report(kHigh, true, 0, 1);
+  mm.on_presence_report(kLow, false, 0, 29999);
+  mm.on_tick(30000);
   TEST_ASSERT_TRUE(kHigh == *mm.master());
+  TEST_ASSERT_TRUE(*mm.master_present());
+}
+
+void test_a_later_override_replaces_a_silent_override() {
+  sls::MotionMaster mm;
+  mm.on_presence_report(kLow, false, 0, 0);
+  mm.on_override(kHigh, 0);
+  mm.on_presence_report(kLow, false, 0, 29999);
+  mm.on_tick(30000);
+  mm.on_override(kLow, 30000);
+  TEST_ASSERT_TRUE(kLow == *mm.master());
 }
 
 void test_override_ranks_first_and_is_recorded() {
@@ -340,6 +350,44 @@ void test_sensor_gone_silent_while_present_does_not_block_later_onsets() {
   TEST_ASSERT_EQUAL(2, mm.record().onsets_counted);
 }
 
+void test_motion_presence_is_unknown_with_no_sensor_known() {
+  sls::MotionMaster mm;
+  mm.on_tick(100000);
+  TEST_ASSERT_FALSE(mm.motion_presence().has_value());
+}
+
+void test_motion_presence_is_absent_when_every_sensor_goes_silent() {
+  sls::MotionMaster mm;
+  mm.on_presence_report(kLow, true, 0, 0);
+  mm.on_tick(10001);
+  TEST_ASSERT_TRUE(mm.motion_presence().has_value());
+  TEST_ASSERT_FALSE(*mm.motion_presence());
+}
+
+void test_motion_presence_follows_the_master() {
+  sls::MotionMaster mm;
+  mm.on_presence_report(kLow, true, 0, 0);
+  TEST_ASSERT_TRUE(mm.motion_presence().has_value());
+  TEST_ASSERT_TRUE(*mm.motion_presence());
+}
+
+void test_silent_override_keeps_its_last_presence_as_motion_presence() {
+  sls::MotionMaster mm;
+  mm.on_override(kHigh, 0);
+  mm.on_presence_report(kHigh, true, 0, 1);
+  mm.on_tick(30000);
+  TEST_ASSERT_TRUE(mm.motion_presence().has_value());
+  TEST_ASSERT_TRUE(*mm.motion_presence());
+}
+
+void test_motion_presence_is_absent_before_restored_sensors_report() {
+  sls::MotionMasterRecord saved;
+  saved.scores.push_back({kLow, 3, 100});
+  sls::MotionMaster mm(saved);
+  TEST_ASSERT_TRUE(mm.motion_presence().has_value());
+  TEST_ASSERT_FALSE(*mm.motion_presence());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_group_with_one_sensor_uses_it_as_master);
@@ -360,7 +408,13 @@ int main(int, char**) {
   RUN_TEST(test_onsets_after_an_override_do_not_change_the_master);
   RUN_TEST(test_override_wins_over_a_finished_calibration);
   RUN_TEST(test_a_later_override_replaces_the_earlier_one);
-  RUN_TEST(test_silent_override_fails_over_and_is_restored_when_it_reports_again);
+  RUN_TEST(test_silent_override_stays_master_with_its_last_presence);
+  RUN_TEST(test_a_later_override_replaces_a_silent_override);
+  RUN_TEST(test_motion_presence_is_unknown_with_no_sensor_known);
+  RUN_TEST(test_motion_presence_is_absent_when_every_sensor_goes_silent);
+  RUN_TEST(test_motion_presence_follows_the_master);
+  RUN_TEST(test_silent_override_keeps_its_last_presence_as_motion_presence);
+  RUN_TEST(test_motion_presence_is_absent_before_restored_sensors_report);
   RUN_TEST(test_override_ranks_first_and_is_recorded);
   RUN_TEST(test_record_lists_scores_in_ranking_order);
   RUN_TEST(test_restored_ranking_keeps_the_saved_order_after_calibration);
