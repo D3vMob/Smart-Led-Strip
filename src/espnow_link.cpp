@@ -6,6 +6,7 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 
+#include <atomic>
 #include <cstring>
 
 #include "config.h"
@@ -39,10 +40,13 @@ void on_receive(const esp_now_recv_info_t* recv_info, const uint8_t* data, int l
   ring_head = next;
 }
 
-volatile uint8_t pending_sends = 0;
+// Sends handed to the radio and not yet confirmed; raised by the loop, lowered by the Wi-Fi send callback.
+std::atomic<uint8_t> pending_sends{0};
 
 void on_sent(const esp_now_send_info_t*, esp_now_send_status_t) {
-  if (pending_sends > 0) pending_sends = pending_sends - 1;
+  uint8_t pending = pending_sends.load();
+  while (pending > 0 && !pending_sends.compare_exchange_weak(pending, pending - 1)) {
+  }
 }
 
 }  // namespace
@@ -92,7 +96,7 @@ void EspNowLink::send(const sls::Mac& to, const sls::Message& message) {
   uint8_t buffer[sls::kMaxMessageBytes];
   const size_t length = sls::encode(message, buffer, sizeof(buffer));
   if (length == 0) return;
-  if (esp_now_send(to.data(), buffer, length) == ESP_OK) pending_sends = pending_sends + 1;
+  if (esp_now_send(to.data(), buffer, length) == ESP_OK) pending_sends.fetch_add(1);
 }
 
 void EspNowLink::send_all(const std::vector<sls::Outgoing>& outgoing) {
