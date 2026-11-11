@@ -59,7 +59,7 @@ struct PairingInfo {
 
 // Authentication trailer carried by MatterSilent, State and Heartbeat messages.
 struct SyncAuth {
-  uint32_t boot_nonce = 0;  // random per boot of the sender
+  uint32_t boot_count = 0;  // the sender's boot counter, kept in flash and raised on every boot
   uint32_t counter = 0;     // rises with every sync message the sender sends this boot
   std::array<uint8_t, kSyncTagBytes> tag{};  // HMAC over the frame
 };

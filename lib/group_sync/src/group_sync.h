@@ -21,6 +21,8 @@ enum class SyncRole : uint8_t { Undecided, Coordinator, Member };
 struct SyncRecord {
   SyncRole role = SyncRole::Undecided;
   std::optional<Mac> coordinator;
+  // On a Member: the highest boot counter it accepted from the Coordinator.
+  uint32_t coordinator_boot = 0;
 };
 
 // A message to unicast to one Member.
@@ -37,8 +39,6 @@ constexpr uint32_t kChannelHuntQuietMs = 6000;
 // Time spent listening on each channel while hunting; longer than one Heartbeat interval.
 constexpr uint32_t kChannelHuntDwellMs = 2500;
 constexpr uint8_t kChannelHuntLast = 13;
-// How many of the Coordinator's earlier boot nonces a Member remembers to refuse replays from them.
-constexpr size_t kRetiredNonces = 8;
 
 // Keeps every Member of a Group showing the Coordinator's Group state and
 // blinking in step. Returns the messages to send instead of sending them.
@@ -46,9 +46,9 @@ class GroupSync {
  public:
   // members: the Group table, sorted, self included. secret: the Group secret every
   // sent message is signed with and every received one is verified against.
-  // boot_nonce: identifies this boot in the auth block of every sent message.
+  // boot_count: this Unit's boot counter, sent in the auth block of every message.
   GroupSync(const Mac& self, uint32_t group_id, std::vector<Mac> members, const GroupSecret& secret,
-            const SyncRecord& persisted, uint32_t boot_nonce, const GroupState& initial);
+            const SyncRecord& persisted, uint32_t boot_count, const GroupState& initial);
 
   // This Unit was commissioned into Matter: it becomes Coordinator and tells
   // every other Member to stay Matter-silent.
@@ -68,11 +68,10 @@ class GroupSync {
   // learns its Coordinator from the first MatterSilent, State or Heartbeat it
   // accepts (unless the persisted record already names it; save record() when it
   // changes) and from then on ignores all of them from anyone else.
-  // The message must also be fresh for the Coordinator's boot: within the current boot
-  // nonce the counter must be newer than the last accepted one; a nonce never seen
-  // means the Coordinator rebooted and becomes the current one; a nonce of an earlier
-  // boot (the last kRetiredNonces are remembered) is ignored, so a captured frame
-  // cannot be replayed.
+  // The message must also be fresh for the Coordinator: its boot count must be higher than
+  // the highest accepted so far (the saved one counts after a restart), or equal to it with a
+  // counter newer than the last accepted one (the first counter of a boot since this Unit
+  // started is taken as it comes). A lower boot count is a captured frame and is ignored.
   // Ignored messages have no effect at all.
   // Returns true when the message was applied, false when it was ignored.
   bool on_message(const Message& message, const Mac& from, uint32_t now_ms);
@@ -88,7 +87,7 @@ class GroupSync {
   void regroup(uint32_t group_id, std::vector<Mac> members, const GroupSecret& secret);
 
   SyncRole role() const;
-  // The current role and pinned Coordinator, to save in flash when it changes.
+  // The current role, pinned Coordinator and its highest accepted boot count, to save in flash when it changes.
   SyncRecord record() const;
   bool matter_enabled() const;  // false once Member
   const GroupState& state() const;
@@ -113,7 +112,7 @@ class GroupSync {
   uint32_t group_id_;
   std::vector<Mac> members_;
   GroupSecret secret_;
-  uint32_t boot_nonce_;
+  uint32_t boot_count_;
   uint32_t counter_ = 0;  // one counter for every message this Unit sends
   SyncRole role_;
   GroupState state_;
@@ -125,19 +124,12 @@ class GroupSync {
   // Member side.
   std::optional<Mac> coordinator_;  // restored from the record, else learned from the first accepted message
   bool heard_any_ = false;
-  // Freshness of the Coordinator's frames: its current boot nonce and counter,
-  // plus the nonces of its earlier boots, which are never accepted again.
-  struct Freshness {
-    bool nonce_known = false;
-    uint32_t current_nonce = 0;
-    uint32_t last_counter = 0;
-    std::array<uint32_t, kRetiredNonces> retired{};
-    size_t retired_count = 0;
-    size_t retired_next = 0;
-    // Whether a frame is new for its boot; records it when it is.
-    bool accept(const SyncAuth& auth);
-  };
-  Freshness freshness_;
+  // Freshness of the Coordinator's frames: the highest boot count accepted (restored from
+  // the record) and the last counter accepted for it since this Unit started.
+  bool fresh(const SyncAuth& auth) const;
+  uint32_t coordinator_boot_ = 0;
+  bool counter_known_ = false;
+  uint32_t last_counter_ = 0;
   uint32_t last_seq_ = 0;
   uint32_t last_heard_ms_ = 0;
   bool commissioning_ = false;

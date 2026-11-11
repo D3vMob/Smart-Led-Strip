@@ -69,7 +69,7 @@ static sls::Message heartbeat() {
   message.group_id = 0xCAFEF00D;
   message.sender = {1, 2, 3, 4, 5, 6};
   message.body = sync;
-  message.auth.boot_nonce = 0x11223344;
+  message.auth.boot_count = 0x11223344;
   message.auth.counter = 9;
   return message;
 }
@@ -108,7 +108,7 @@ void test_a_heartbeat_altered_after_signing_fails_verification() {
   check([](sls::Message& m) { m.sender[5] = 7; });
   check([](sls::Message& m) { m.group_id = 0xCAFEF00E; });
   check([](sls::Message& m) { m.type = sls::MessageType::State; });
-  check([](sls::Message& m) { m.auth.boot_nonce += 1; });
+  check([](sls::Message& m) { m.auth.boot_count += 1; });
   check([](sls::Message& m) { m.auth.counter += 1; });
   TEST_ASSERT_EQUAL_INT(0, accepted);
 }

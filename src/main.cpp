@@ -33,7 +33,7 @@ sls::Mac self_mac = {};
 std::unique_ptr<sls::Pairing> pairing;
 std::unique_ptr<sls::GroupSync> group_sync;
 bool matter_started = false;
-uint32_t boot_nonce = 0;
+uint32_t boot_count = 0;
 sls::SyncRecord saved_record;
 SensorStatus reported_status = SensorStatus::Probing;
 bool reported_present = false;
@@ -73,13 +73,16 @@ sls::Look pairing_look(uint32_t now_ms) {
 void build_group_sync() {
   saved_record = load_sync_record();
   group_sync = std::make_unique<sls::GroupSync>(self_mac, pairing->group_id(), pairing->members(),
-                                                pairing->group_secret(), saved_record, boot_nonce, group_state);
+                                                pairing->group_secret(), saved_record, boot_count, group_state);
 }
 
-// Saves the role and Coordinator when they differ from what is in flash.
+// Saves the role, Coordinator and Coordinator boot when they differ from what is in flash.
 void save_record_if_changed() {
   const sls::SyncRecord record = group_sync->record();
-  if (record.role == saved_record.role && record.coordinator == saved_record.coordinator) return;
+  if (record.role == saved_record.role && record.coordinator == saved_record.coordinator &&
+      record.coordinator_boot == saved_record.coordinator_boot) {
+    return;
+  }
   save_sync_record(record);
   saved_record = record;
 }
@@ -137,7 +140,7 @@ void setup() {
   pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
   espnow.begin();
   self_mac = espnow.self_mac();
-  boot_nonce = esp_random();
+  boot_count = next_boot_count();
   const std::optional<sls::GroupSecret> secret = load_group_secret();
   if (secret) {
     pairing = std::make_unique<sls::Pairing>(self_mac, load_group_members(), *secret);

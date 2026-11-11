@@ -225,7 +225,7 @@ static const sls::MessageType kAllTypes[] = {
 
 static sls::SyncAuth sample_auth() {
   sls::SyncAuth auth;
-  auth.boot_nonce = 0xCAFEF00D;
+  auth.boot_count = 0xCAFEF00D;
   auth.counter = 0x00000102;
   for (size_t i = 0; i < auth.tag.size(); ++i) auth.tag[i] = static_cast<uint8_t>(0xB0 + i);
   return auth;
@@ -565,7 +565,7 @@ void test_state_wire_layout_matches_the_golden_bytes() {
       0x04, 0x03, 0x02, 0x01,                  // seq
       0x0D, 0x0C, 0x0B, 0x0A,                  // blink_phase_ms
       0x06,                                    // wifi_channel
-      0x0D, 0xF0, 0xFE, 0xCA,                  // auth boot_nonce
+      0x0D, 0xF0, 0xFE, 0xCA,                  // auth boot_count
       0x02, 0x01, 0x00, 0x00,                  // auth counter
       0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7,
       0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF};  // auth tag
@@ -608,7 +608,7 @@ void test_sync_messages_keep_their_auth_fields_across_encode_and_decode() {
 
     sls::Decoded decoded = sls::decode(buf, n, 0x12345678);
     TEST_ASSERT_TRUE(decoded.ok);
-    TEST_ASSERT_EQUAL_UINT32(0xCAFEF00D, decoded.message.auth.boot_nonce);
+    TEST_ASSERT_EQUAL_UINT32(0xCAFEF00D, decoded.message.auth.boot_count);
     TEST_ASSERT_EQUAL_UINT32(0x102, decoded.message.auth.counter);
     TEST_ASSERT_TRUE(message.auth.tag == decoded.message.auth.tag);
   }

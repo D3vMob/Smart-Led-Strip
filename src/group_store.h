@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -14,9 +15,14 @@ void save_group_members(const std::vector<sls::Mac>& members);
 std::optional<sls::GroupSecret> load_group_secret();
 void save_group_secret(const sls::GroupSecret& secret);
 
-// Loads the Unit's saved role and Coordinator; Undecided with no Coordinator when nothing valid is stored.
+// Loads the Unit's saved role, Coordinator and the Coordinator boot last accepted; Undecided with no
+// Coordinator when nothing valid is stored.
 sls::SyncRecord load_sync_record();
 void save_sync_record(const sls::SyncRecord& record);
+
+// Raises this Unit's boot counter in flash and returns it, so every boot signs its sync
+// messages with a higher boot count than the one before.
+uint32_t next_boot_count();
 
 // A re-pairing resets Calibration and any Override: clears the whole "motion" namespace.
 void clear_motion_master_keys();

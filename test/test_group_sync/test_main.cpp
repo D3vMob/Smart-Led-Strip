@@ -7,18 +7,19 @@ void tearDown() {}
 
 static const sls::Mac kMacs[3] = {{0x02, 0, 0, 0, 0, 0x01}, {0x02, 0, 0, 0, 0, 0x02}, {0x02, 0, 0, 0, 0, 0x03}};
 static const uint32_t kGroupId = 0xABCD;
-static const uint32_t kBootNonce = 0x1234;
+static const uint32_t kBootCount = 0x1234;
+static const uint32_t kRebootedBootCount = 0x9999;  // a later boot than kBootCount
 static const sls::GroupSecret kSecret = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
                                          17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32};
 static const sls::GroupSecret kOtherSecret = {9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9,
                                               9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9};
 
 // A message signed with the Group secret, as a genuine Member would send it.
-// A message with no auth stamp yet gets this boot's nonce and the next counter, like a live sender.
+// A message with no auth stamp yet gets this boot count and the next counter, like a live sender.
 static sls::Message signed_msg(sls::Message message, const sls::GroupSecret& secret = kSecret) {
   static uint32_t next_counter = 0;
   if (message.auth.counter == 0) {
-    message.auth.boot_nonce = kBootNonce;
+    message.auth.boot_count = kBootCount;
     message.auth.counter = ++next_counter;
   }
   sls::sign(message, secret);
@@ -48,9 +49,9 @@ void test_a_change_on_the_coordinator_reaches_every_member() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupState initial = sls::default_group_state();
   std::vector<sls::GroupSync> units;
-  units.emplace_back(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootNonce, initial);
-  units.emplace_back(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, initial);
-  units.emplace_back(kMacs[2], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, initial);
+  units.emplace_back(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount, initial);
+  units.emplace_back(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
+  units.emplace_back(kMacs[2], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
 
   sls::GroupState changed = sls::apply(initial, sls::Command::open());
   changed = sls::apply(changed, sls::Command::set_hue_sat(200, 80));
@@ -68,8 +69,8 @@ void test_a_change_on_the_coordinator_reaches_every_member() {
 void test_a_member_drops_a_state_with_an_older_sequence() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupState initial = sls::default_group_state();
-  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootNonce, initial);
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, initial);
+  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount, initial);
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
 
   sls::GroupState a = sls::apply(initial, sls::Command::open());
   sls::GroupState b = sls::apply(a, sls::Command::set_hue_sat(200, 80));
@@ -89,7 +90,7 @@ static sls::Message state_message(const sls::GroupState& state, uint32_t seq) {
 void test_a_member_accepts_a_newer_sequence_across_32_bit_wrap_around() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupState initial = sls::default_group_state();
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, initial);
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
 
   sls::GroupState a = sls::apply(initial, sls::Command::open());
   sls::GroupState b = sls::apply(a, sls::Command::set_hue_sat(200, 80));
@@ -104,7 +105,7 @@ void test_a_member_accepts_a_newer_sequence_across_32_bit_wrap_around() {
 
 void test_the_coordinator_sends_a_heartbeat_to_every_other_member_every_two_seconds() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
-  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootNonce, sls::default_group_state());
+  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount, sls::default_group_state());
   sls::GroupState changed = sls::apply(sls::default_group_state(), sls::Command::open());
   changed = sls::apply(changed, sls::Command::set_blink(true));
   uint32_t last_seq = 0;
@@ -134,15 +135,15 @@ void test_the_coordinator_sends_a_heartbeat_to_every_other_member_every_two_seco
 
 void test_a_member_or_undecided_unit_sends_no_heartbeat() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, sls::default_group_state());
-  sls::GroupSync undecided(kMacs[2], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Undecided}, kBootNonce, sls::default_group_state());
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, sls::default_group_state());
+  sls::GroupSync undecided(kMacs[2], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Undecided}, kBootCount, sls::default_group_state());
   TEST_ASSERT_EQUAL(0, member.on_tick(0, 6).size());
   TEST_ASSERT_EQUAL(0, undecided.on_tick(0, 6).size());
 }
 
 void test_a_member_hearing_a_heartbeat_records_when() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, sls::default_group_state());
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, sls::default_group_state());
   sls::Message heartbeat = signed_msg(sls::Message{sls::MessageType::Heartbeat, kGroupId, kMacs[0],
                                                    sls::StateSync{sls::default_group_state(), 5, 0, 6}});
   member.on_message(heartbeat, kMacs[0], 2345);
@@ -157,9 +158,9 @@ void test_a_member_that_missed_a_state_catches_up_on_the_next_heartbeat() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupState initial = sls::default_group_state();
   std::vector<sls::GroupSync> units;
-  units.emplace_back(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootNonce, initial);
-  units.emplace_back(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, initial);
-  units.emplace_back(kMacs[2], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, initial);
+  units.emplace_back(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount, initial);
+  units.emplace_back(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
+  units.emplace_back(kMacs[2], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
   sls::GroupState changed = sls::apply(initial, sls::Command::open());
   changed = sls::apply(changed, sls::Command::set_hue_sat(200, 80));
 
@@ -176,11 +177,11 @@ void test_a_member_that_missed_a_state_catches_up_on_the_next_heartbeat() {
 void test_a_member_follows_a_rebooted_coordinator_after_its_next_heartbeat() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupState initial = sls::default_group_state();
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, initial);
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
   sls::GroupState old_state = sls::apply(initial, sls::Command::open());
   member.on_message(state_message(old_state, 57), kMacs[0], 1000);
 
-  sls::GroupSync rebooted(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootNonce + 1, initial);
+  sls::GroupSync rebooted(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount + 1, initial);
   sls::GroupState first = sls::apply(initial, sls::Command::set_hue_sat(200, 80));
   for (const sls::Outgoing& o : rebooted.on_local_change(first, 5000))
     if (o.to == kMacs[1]) member.on_message(o.message, o.message.sender, 5000);
@@ -199,11 +200,11 @@ void test_a_member_follows_a_rebooted_coordinator_after_its_next_heartbeat() {
 void test_a_rebooted_member_catches_up_on_the_next_heartbeat() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupState initial = sls::default_group_state();
-  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootNonce, initial);
+  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount, initial);
   sls::GroupState changed = sls::apply(initial, sls::Command::open());
   coordinator.on_local_change(changed, 1000);
 
-  sls::GroupSync rebooted(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, initial);
+  sls::GroupSync rebooted(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
   for (const sls::Outgoing& o : coordinator.on_tick(2000, 6))
     if (o.to == kMacs[1]) rebooted.on_message(o.message, o.message.sender, 2000);
 
@@ -222,7 +223,7 @@ static sls::Message heartbeat_with_phase(uint32_t seq, uint32_t phase_ms) {
 
 static sls::GroupSync blinking_member() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, sls::default_group_state());
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, sls::default_group_state());
   member.on_message(state_message(blinking_state(), 1), kMacs[0], 0);
   return member;
 }
@@ -249,12 +250,12 @@ void test_blink_drift_is_measured_around_the_period() {
 
 void test_a_member_blinks_in_step_with_the_coordinator_after_the_first_heartbeat() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
-  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootNonce, sls::default_group_state());
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, sls::default_group_state());
+  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount, sls::default_group_state());
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, sls::default_group_state());
   for (const sls::Outgoing& o : coordinator.on_local_change(blinking_state(), 0))
     if (o.to == kMacs[1]) member.on_message(o.message, o.message.sender, 0);
   sls::Message knock = heartbeat_with_phase(1, 300);
-  knock.auth.boot_nonce = kBootNonce;
+  knock.auth.boot_count = kBootCount;
   knock.auth.counter = 2;  // between the coordinator's State (1) and its next Heartbeat (3)
   sls::sign(knock, kSecret);
   member.on_message(knock, kMacs[0], 1000);  // knocks the Member's clock off
@@ -272,7 +273,7 @@ void test_a_member_blinks_in_step_with_the_coordinator_after_the_first_heartbeat
 static std::vector<sls::GroupSync> make_units(sls::SyncRole role) {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   std::vector<sls::GroupSync> units;
-  for (size_t i = 0; i < 3; ++i) units.emplace_back(kMacs[i], kGroupId, table, kSecret, sls::SyncRecord{role}, kBootNonce, sls::default_group_state());
+  for (size_t i = 0; i < 3; ++i) units.emplace_back(kMacs[i], kGroupId, table, kSecret, sls::SyncRecord{role}, kBootCount, sls::default_group_state());
   return units;
 }
 
@@ -401,7 +402,7 @@ void test_a_coordinators_record_has_no_coordinator_to_follow() {
 
 void test_the_coordinator_pin_survives_a_restart() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member, kMacs[0]}, kBootNonce,
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member, kMacs[0]}, kBootCount,
                         sls::default_group_state());
   sls::GroupState changed = sls::apply(sls::default_group_state(), sls::Command::open());
 
@@ -465,8 +466,8 @@ void test_the_coordinator_ignores_states_and_heartbeats_it_receives() {
 void test_an_undecided_unit_that_hears_a_state_becomes_a_member() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupState initial = sls::default_group_state();
-  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootNonce, initial);
-  sls::GroupSync undecided(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Undecided}, kBootNonce, initial);
+  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount, initial);
+  sls::GroupSync undecided(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Undecided}, kBootCount, initial);
   sls::GroupState changed = sls::apply(initial, sls::Command::open());
 
   for (const sls::Outgoing& o : coordinator.on_local_change(changed, 1000))
@@ -480,8 +481,8 @@ void test_an_undecided_unit_that_hears_a_state_becomes_a_member() {
 void test_an_undecided_unit_that_hears_a_heartbeat_becomes_a_member() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupState initial = sls::default_group_state();
-  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootNonce, initial);
-  sls::GroupSync undecided(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Undecided}, kBootNonce, initial);
+  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount, initial);
+  sls::GroupSync undecided(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Undecided}, kBootCount, initial);
   coordinator.on_local_change(sls::apply(initial, sls::Command::open()), 500);
 
   for (const sls::Outgoing& o : coordinator.on_tick(1000, 6))
@@ -505,7 +506,7 @@ void test_a_member_that_hears_nothing_hunts_across_the_channels_after_six_second
 
 void test_a_member_stops_hunting_once_it_hears_a_heartbeat_and_hunts_again_after_six_more_seconds() {
   std::vector<sls::GroupSync> units = make_units(sls::SyncRole::Member);
-  units[0] = sls::GroupSync(kMacs[0], kGroupId, std::vector<sls::Mac>(kMacs, kMacs + 3), kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootNonce,
+  units[0] = sls::GroupSync(kMacs[0], kGroupId, std::vector<sls::Mac>(kMacs, kMacs + 3), kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount,
                             sls::default_group_state());
   TEST_ASSERT_EQUAL(2, units[1].listen_channel(10000));
 
@@ -529,7 +530,7 @@ void test_a_coordinator_never_hunts() {
 }
 
 void test_a_unit_alone_in_its_group_never_hunts() {
-  sls::GroupSync alone(kMacs[1], kGroupId, std::vector<sls::Mac>{kMacs[1]}, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, sls::default_group_state());
+  sls::GroupSync alone(kMacs[1], kGroupId, std::vector<sls::Mac>{kMacs[1]}, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, sls::default_group_state());
   TEST_ASSERT_EQUAL(0, alone.listen_channel(6000));
   TEST_ASSERT_EQUAL(0, alone.listen_channel(100000));
 }
@@ -553,7 +554,7 @@ void test_an_undecided_unit_alone_in_its_group_never_becomes_a_member() {
   sls::GroupState initial = sls::default_group_state();
   sls::GroupState other = sls::default_group_state();
   other.open = !initial.open;
-  sls::GroupSync alone(kMacs[0], kGroupId, std::vector<sls::Mac>{kMacs[0]}, kSecret, sls::SyncRecord{sls::SyncRole::Undecided}, kBootNonce, initial);
+  sls::GroupSync alone(kMacs[0], kGroupId, std::vector<sls::Mac>{kMacs[0]}, kSecret, sls::SyncRecord{sls::SyncRole::Undecided}, kBootCount, initial);
   sls::Message silent = signed_msg(sls::Message{sls::MessageType::MatterSilent, kGroupId, kMacs[1], {}});
   TEST_ASSERT_FALSE(alone.on_message(silent, kMacs[1], 1000));
   TEST_ASSERT_FALSE(alone.on_message(state_message(other, 1), kMacs[1], 1100));
@@ -567,7 +568,7 @@ void test_an_undecided_unit_alone_in_its_group_never_becomes_a_member() {
 
 void test_once_it_follows_a_coordinator_a_member_ignores_state_and_heartbeat_from_another_member() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, sls::default_group_state());
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, sls::default_group_state());
   sls::GroupState coordinators = sls::default_group_state();
   coordinators.open = true;
   TEST_ASSERT_TRUE(member.on_message(signed_msg(sls::Message{sls::MessageType::Heartbeat, kGroupId, kMacs[0], sls::StateSync{coordinators, 5, 0, 6}}),
@@ -610,16 +611,16 @@ void test_a_forged_matter_silent_neither_settles_an_undecided_unit_nor_pins_the_
   TEST_ASSERT_EQUAL(static_cast<int>(sls::SyncRole::Member), static_cast<int>(units[1].role()));
 }
 
-static sls::Message heartbeat_stamped(const sls::GroupState& state, uint32_t nonce, uint32_t counter) {
+static sls::Message heartbeat_stamped(const sls::GroupState& state, uint32_t boot_count, uint32_t counter) {
   sls::Message m{sls::MessageType::Heartbeat, kGroupId, kMacs[0], sls::StateSync{state, 1, 0, 6}};
-  m.auth.boot_nonce = nonce;
+  m.auth.boot_count = boot_count;
   m.auth.counter = counter;
   return signed_msg(m);
 }
 
-static sls::Message state_stamped(const sls::GroupState& state, uint32_t seq, uint32_t nonce, uint32_t counter) {
+static sls::Message state_stamped(const sls::GroupState& state, uint32_t seq, uint32_t boot_count, uint32_t counter) {
   sls::Message m{sls::MessageType::State, kGroupId, kMacs[0], sls::StateSync{state, seq, 0, 0}};
-  m.auth.boot_nonce = nonce;
+  m.auth.boot_count = boot_count;
   m.auth.counter = counter;
   return signed_msg(m);
 }
@@ -627,11 +628,11 @@ static sls::Message state_stamped(const sls::GroupState& state, uint32_t seq, ui
 void test_a_replayed_heartbeat_is_ignored() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupState initial = sls::default_group_state();
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, initial);
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
   sls::GroupState a = sls::apply(initial, sls::Command::open());
   sls::GroupState b = sls::apply(a, sls::Command::set_hue_sat(200, 80));
-  const sls::Message h1 = heartbeat_stamped(a, kBootNonce, 5);
-  const sls::Message h2 = heartbeat_stamped(b, kBootNonce, 6);
+  const sls::Message h1 = heartbeat_stamped(a, kBootCount, 5);
+  const sls::Message h2 = heartbeat_stamped(b, kBootCount, 6);
   member.on_message(h1, kMacs[0], 1000);
   member.on_message(h2, kMacs[0], 2000);
 
@@ -647,11 +648,11 @@ void test_a_replayed_heartbeat_is_ignored() {
 void test_a_replayed_state_is_ignored() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupState initial = sls::default_group_state();
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, initial);
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
   sls::GroupState a = sls::apply(initial, sls::Command::open());
   sls::GroupState b = sls::apply(a, sls::Command::set_hue_sat(200, 80));
-  const sls::Message s1 = state_stamped(a, 1, kBootNonce, 5);
-  const sls::Message s2 = state_stamped(b, 2, kBootNonce, 6);
+  const sls::Message s1 = state_stamped(a, 1, kBootCount, 5);
+  const sls::Message s2 = state_stamped(b, 2, kBootCount, 6);
   member.on_message(s1, kMacs[0], 1000);
   member.on_message(s2, kMacs[0], 2000);
 
@@ -662,12 +663,12 @@ void test_a_replayed_state_is_ignored() {
   TEST_ASSERT_EQUAL_UINT32(2000, member.last_heard_ms());
 }
 
-void test_a_member_follows_a_coordinator_that_rebooted_with_a_new_boot_nonce() {
+void test_a_coordinator_reboot_with_a_higher_boot_count_is_followed_and_the_members_record_saves_the_new_boot() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupState initial = sls::default_group_state();
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, initial);
-  member.on_message(heartbeat_stamped(initial, kBootNonce, 50), kMacs[0], 1000);
-  sls::GroupSync rebooted(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, 0x9999, initial);
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
+  member.on_message(heartbeat_stamped(initial, kBootCount, 50), kMacs[0], 1000);
+  sls::GroupSync rebooted(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kRebootedBootCount, initial);
   sls::GroupState changed = sls::apply(initial, sls::Command::set_hue_sat(200, 80));
   rebooted.on_local_change(changed, 4000);
 
@@ -677,27 +678,65 @@ void test_a_member_follows_a_coordinator_that_rebooted_with_a_new_boot_nonce() {
 
   TEST_ASSERT_TRUE(accepted);
   assert_same_state(changed, member.state());
+  TEST_ASSERT_EQUAL_UINT32(kRebootedBootCount, member.record().coordinator_boot);
+
+  sls::GroupSync restarted(kMacs[1], kGroupId, table, kSecret, member.record(), kBootCount + 1, initial);
+  sls::GroupState next = sls::apply(changed, sls::Command::set_hue_sat(10, 30));
+  bool followed = false;
+  for (const sls::Outgoing& o : rebooted.on_local_change(next, 6000))
+    if (o.to == kMacs[1]) followed = restarted.on_message(o.message, o.message.sender, 6000);
+  TEST_ASSERT_TRUE(followed);
+  assert_same_state(next, restarted.state());
 }
 
 void test_frames_from_a_coordinators_earlier_boot_are_ignored_once_it_rebooted() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupState initial = sls::default_group_state();
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootNonce, initial);
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
   sls::GroupState a = sls::apply(initial, sls::Command::open());
   sls::GroupState b = sls::apply(a, sls::Command::set_hue_sat(200, 80));
-  member.on_message(heartbeat_stamped(a, kBootNonce, 5), kMacs[0], 1000);
-  member.on_message(heartbeat_stamped(b, 0x9999, 1), kMacs[0], 2000);
+  member.on_message(heartbeat_stamped(a, kBootCount, 5), kMacs[0], 1000);
+  member.on_message(heartbeat_stamped(b, kRebootedBootCount, 1), kMacs[0], 2000);
 
-  const bool captured = member.on_message(heartbeat_stamped(a, kBootNonce, 900), kMacs[0], 3000);
+  const bool captured = member.on_message(heartbeat_stamped(a, kBootCount, 900), kMacs[0], 3000);
 
   TEST_ASSERT_FALSE(captured);
   assert_same_state(b, member.state());
   TEST_ASSERT_EQUAL_UINT32(2000, member.last_heard_ms());
 }
 
+void test_a_frame_from_an_earlier_boot_replayed_after_the_member_restarts_is_ignored_and_the_live_coordinator_is_still_followed() {
+  std::vector<sls::Mac> table(kMacs, kMacs + 3);
+  sls::GroupState initial = sls::default_group_state();
+  sls::GroupSync earlier(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount, initial);
+  sls::Message captured;
+  for (const sls::Outgoing& o : earlier.on_tick(1000, 6))
+    if (o.to == kMacs[1]) captured = o.message;
+
+  sls::GroupSync live(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kRebootedBootCount, initial);
+  sls::GroupState first = sls::apply(initial, sls::Command::set_hue_sat(200, 80));
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
+  for (const sls::Outgoing& o : live.on_local_change(first, 2000))
+    if (o.to == kMacs[1]) member.on_message(o.message, o.message.sender, 2000);
+
+  const sls::SyncRecord saved = member.record();
+  TEST_ASSERT_EQUAL_UINT32(kRebootedBootCount, saved.coordinator_boot);
+  sls::GroupSync restarted(kMacs[1], kGroupId, table, kSecret, saved, kBootCount + 1, initial);
+
+  TEST_ASSERT_FALSE(restarted.on_message(captured, kMacs[0], 3000));
+  assert_same_state(initial, restarted.state());
+
+  sls::GroupState second = sls::apply(first, sls::Command::set_hue_sat(10, 30));
+  bool accepted = false;
+  for (const sls::Outgoing& o : live.on_local_change(second, 4000))
+    if (o.to == kMacs[1]) accepted = restarted.on_message(o.message, o.message.sender, 4000);
+  TEST_ASSERT_TRUE(accepted);
+  assert_same_state(second, restarted.state());
+}
+
 void test_re_pairing_clears_a_members_role_and_coordinator_pin() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member, kMacs[0]}, kBootNonce, sls::default_group_state());
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member, kMacs[0]}, kBootCount, sls::default_group_state());
   member.regroup(kGroupId, table, kOtherSecret);
   TEST_ASSERT_EQUAL(sls::SyncRole::Undecided, member.role());
   TEST_ASSERT_TRUE(member.matter_enabled());
@@ -707,15 +746,34 @@ void test_re_pairing_clears_a_members_role_and_coordinator_pin() {
 
 void test_re_pairing_clears_a_coordinators_role() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
-  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootNonce, sls::default_group_state());
+  sls::GroupSync coordinator(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount, sls::default_group_state());
   coordinator.regroup(kGroupId, table, kOtherSecret);
   TEST_ASSERT_EQUAL(sls::SyncRole::Undecided, coordinator.record().role);
   TEST_ASSERT_TRUE(coordinator.on_tick(10000, 6).empty());
 }
 
+void test_re_pairing_resets_the_saved_boot_count() {
+  std::vector<sls::Mac> table(kMacs, kMacs + 3);
+  sls::GroupState initial = sls::default_group_state();
+  sls::GroupSync live(kMacs[0], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kRebootedBootCount, initial);
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, initial);
+  for (const sls::Outgoing& o : live.on_tick(1000, 6))
+    if (o.to == kMacs[1]) member.on_message(o.message, o.message.sender, 1000);
+  TEST_ASSERT_EQUAL_UINT32(kRebootedBootCount, member.record().coordinator_boot);
+
+  member.regroup(kGroupId, table, kOtherSecret);
+  TEST_ASSERT_EQUAL_UINT32(0, member.record().coordinator_boot);
+
+  sls::GroupSync repaired(kMacs[0], kGroupId, table, kOtherSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount, initial);
+  bool accepted = false;
+  for (const sls::Outgoing& o : repaired.on_tick(3000, 6))
+    if (o.to == kMacs[1]) accepted = member.on_message(o.message, o.message.sender, 3000);
+  TEST_ASSERT_TRUE(accepted);
+}
+
 void test_after_re_pairing_only_frames_signed_with_the_new_group_secret_are_heard() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
-  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member, kMacs[0]}, kBootNonce, sls::default_group_state());
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member, kMacs[0]}, kBootCount, sls::default_group_state());
   sls::Message old_frame = signed_msg(sls::Message{sls::MessageType::MatterSilent, kGroupId, kMacs[2], std::monostate{}}, kSecret);
   member.on_message(signed_msg(sls::Message{sls::MessageType::MatterSilent, kGroupId, kMacs[0], std::monostate{}}), kMacs[0], 100);
   member.regroup(kGroupId, table, kOtherSecret);
@@ -726,7 +784,7 @@ void test_after_re_pairing_only_frames_signed_with_the_new_group_secret_are_hear
   fresh.group_id = kGroupId;
   fresh.sender = kMacs[2];
   fresh.body = std::monostate{};
-  fresh.auth.boot_nonce = kBootNonce;
+  fresh.auth.boot_count = kBootCount;
   fresh.auth.counter = 1;
   sls::sign(fresh, kOtherSecret);
   TEST_ASSERT_TRUE(member.on_message(fresh, kMacs[2], 300));
@@ -780,10 +838,12 @@ int main() {
   RUN_TEST(test_a_coordinators_record_has_no_coordinator_to_follow);
   RUN_TEST(test_the_coordinator_pin_survives_a_restart);
   RUN_TEST(test_a_replayed_state_is_ignored);
-  RUN_TEST(test_a_member_follows_a_coordinator_that_rebooted_with_a_new_boot_nonce);
+  RUN_TEST(test_a_coordinator_reboot_with_a_higher_boot_count_is_followed_and_the_members_record_saves_the_new_boot);
   RUN_TEST(test_frames_from_a_coordinators_earlier_boot_are_ignored_once_it_rebooted);
+  RUN_TEST(test_a_frame_from_an_earlier_boot_replayed_after_the_member_restarts_is_ignored_and_the_live_coordinator_is_still_followed);
   RUN_TEST(test_re_pairing_clears_a_members_role_and_coordinator_pin);
   RUN_TEST(test_re_pairing_clears_a_coordinators_role);
   RUN_TEST(test_after_re_pairing_only_frames_signed_with_the_new_group_secret_are_heard);
+  RUN_TEST(test_re_pairing_resets_the_saved_boot_count);
   return UNITY_END();
 }

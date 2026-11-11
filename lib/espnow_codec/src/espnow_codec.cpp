@@ -180,7 +180,7 @@ size_t encode(const Message& message, uint8_t* out, size_t capacity) {
   }
   if (is_sync_message(message.type)) {
     uint8_t* a = out + total - kAuthBytes;
-    put32(a, message.auth.boot_nonce);
+    put32(a, message.auth.boot_count);
     put32(a + 4, message.auth.counter);
     for (size_t i = 0; i < kSyncTagBytes; ++i) a[8 + i] = message.auth.tag[i];
   }
@@ -277,7 +277,7 @@ Decoded decode(const uint8_t* buf, size_t len, uint32_t my_group_id) {
   }
   if (is_sync_message(type)) {
     const uint8_t* a = buf + len - kAuthBytes;
-    result.message.auth.boot_nonce = get32(a);
+    result.message.auth.boot_count = get32(a);
     result.message.auth.counter = get32(a + 4);
     for (size_t i = 0; i < kSyncTagBytes; ++i) result.message.auth.tag[i] = a[8 + i];
   }
