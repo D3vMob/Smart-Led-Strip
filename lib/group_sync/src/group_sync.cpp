@@ -116,6 +116,43 @@ bool GroupSync::on_message(const Message& message, const Mac& from, uint32_t now
   return true;
 }
 
+std::vector<Outgoing> GroupSync::to_coordinator(const Message& body) {
+  if (role_ != SyncRole::Member || !coordinator_) return {};
+  Message message = body;
+  message.auth.boot_count = boot_count_;
+  message.auth.counter = ++counter_;
+  sign(message, secret_);
+  return {{*coordinator_, message}};
+}
+
+std::vector<Outgoing> GroupSync::report_presence(bool present, uint32_t total_presence_ms) {
+  return to_coordinator(Message{MessageType::Presence, group_id_, self_, Presence{present, total_presence_ms}});
+}
+
+std::vector<Outgoing> GroupSync::claim_override() {
+  return to_coordinator(Message{MessageType::OverrideClaim, group_id_, self_, std::monostate{}});
+}
+
+bool GroupSync::on_member_report(const Message& message, const Mac& from) {
+  if (role_ != SyncRole::Coordinator) return false;
+  if (message.type != MessageType::Presence && message.type != MessageType::OverrideClaim) return false;
+  if (!verify(message, secret_)) return false;
+  if (message.group_id != group_id_) return false;
+  if (from == self_ || std::find(members_.begin(), members_.end(), from) == members_.end()) return false;
+  if (from != message.sender) return false;
+  auto last = std::find_if(last_report_.begin(), last_report_.end(), [&](const auto& e) { return e.first == from; });
+  if (last != last_report_.end()) {
+    const SyncAuth& seen = last->second;
+    const bool newer = message.auth.boot_count > seen.boot_count ||
+                       (message.auth.boot_count == seen.boot_count && seq_is_newer(message.auth.counter, seen.counter));
+    if (!newer) return false;
+    last->second = message.auth;
+  } else {
+    last_report_.push_back({from, message.auth});
+  }
+  return true;
+}
+
 void GroupSync::regroup(uint32_t group_id, std::vector<Mac> members, const GroupSecret& secret) {
   group_id_ = group_id;
   members_ = std::move(members);
@@ -129,6 +166,7 @@ void GroupSync::regroup(uint32_t group_id, std::vector<Mac> members, const Group
   coordinator_boot_ = 0;
   counter_known_ = false;
   last_counter_ = 0;
+  last_report_.clear();
   last_seq_ = 0;
   last_heard_ms_ = 0;
 }

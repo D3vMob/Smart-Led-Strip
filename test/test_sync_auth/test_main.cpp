@@ -134,6 +134,55 @@ void test_a_pairing_hello_never_verifies() {
   TEST_ASSERT_FALSE(sls::verify(message, secret_of(0x5a)));
 }
 
+static sls::Message presence_message() {
+  sls::Message message = heartbeat();
+  message.type = sls::MessageType::Presence;
+  message.body = sls::Presence{true, 4200};
+  return message;
+}
+
+static sls::Message override_claim_message() {
+  sls::Message message = heartbeat();
+  message.type = sls::MessageType::OverrideClaim;
+  message.body = std::monostate{};
+  return message;
+}
+
+void test_a_signed_presence_and_override_claim_verify_with_the_group_secret() {
+  sls::Message presence = presence_message();
+  sls::sign(presence, secret_of(0x5a));
+  sls::Message claim = override_claim_message();
+  sls::sign(claim, secret_of(0x5a));
+  TEST_ASSERT_TRUE(sls::verify(presence, secret_of(0x5a)) && sls::verify(claim, secret_of(0x5a)));
+}
+
+void test_a_presence_and_override_claim_signed_with_another_secret_fail() {
+  sls::Message presence = presence_message();
+  sls::sign(presence, secret_of(0x5a));
+  sls::Message claim = override_claim_message();
+  sls::sign(claim, secret_of(0x5a));
+  TEST_ASSERT_FALSE(sls::verify(presence, secret_of(0x5b)) || sls::verify(claim, secret_of(0x5b)));
+}
+
+void test_a_presence_altered_after_signing_fails_verification() {
+  const sls::GroupSecret secret = secret_of(0x5a);
+  sls::Message signed_message = presence_message();
+  sls::sign(signed_message, secret);
+  sls::Message flipped = signed_message;
+  std::get<sls::Presence>(flipped.body).present = false;
+  sls::Message longer = signed_message;
+  std::get<sls::Presence>(longer.body).total_presence_ms += 1;
+  TEST_ASSERT_FALSE(sls::verify(flipped, secret) || sls::verify(longer, secret));
+}
+
+void test_an_override_claim_with_a_changed_sender_fails_verification() {
+  const sls::GroupSecret secret = secret_of(0x5a);
+  sls::Message claim = override_claim_message();
+  sls::sign(claim, secret);
+  claim.sender[5] = 7;
+  TEST_ASSERT_FALSE(sls::verify(claim, secret));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_sha256_of_abc_matches_the_standard_vector);
@@ -146,5 +195,9 @@ int main(int, char**) {
   RUN_TEST(test_a_heartbeat_signed_with_another_secret_fails);
   RUN_TEST(test_an_unsigned_sync_message_fails_verification);
   RUN_TEST(test_a_pairing_hello_never_verifies);
+  RUN_TEST(test_a_signed_presence_and_override_claim_verify_with_the_group_secret);
+  RUN_TEST(test_a_presence_and_override_claim_signed_with_another_secret_fail);
+  RUN_TEST(test_a_presence_altered_after_signing_fails_verification);
+  RUN_TEST(test_an_override_claim_with_a_changed_sender_fails_verification);
   return UNITY_END();
 }
