@@ -14,6 +14,7 @@ constexpr const char* kRoleKey = "role";
 constexpr const char* kCoordinatorKey = "coord";
 constexpr const char* kSecretKey = "secret";
 constexpr const char* kCoordinatorBootKey = "coordboot";
+constexpr const char* kChannelKey = "channel";
 constexpr const char* kBootCountKey = "bootcount";
 constexpr const char* kMotionNamespace = "motion";
 constexpr const char* kMotionRecordKey = "record";
@@ -89,6 +90,7 @@ sls::SyncRecord load_sync_record() {
     record.coordinator = coordinator;
   }
   record.coordinator_boot = preferences.getULong(kCoordinatorBootKey, 0);
+  record.channel = preferences.getUChar(kChannelKey, 0);
   preferences.end();
   return record;
 }
@@ -107,6 +109,7 @@ void save_sync_record(const sls::SyncRecord& record) {
   } else {
     preferences.remove(kCoordinatorBootKey);
   }
+  preferences.putUChar(kChannelKey, record.channel);
   preferences.end();
 }
 

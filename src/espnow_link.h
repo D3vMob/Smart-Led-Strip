@@ -16,6 +16,8 @@ class EspNowLink {
   void send_ack(const sls::Mac& to, uint32_t group_id, const sls::Mac& self, const sls::PairingInfo& info);
   // Unicasts each message to its addressee, an encrypted Member peer.
   void send_all(const std::vector<sls::Outgoing>& outgoing);
+  // Waits until every send so far has left the radio, or timeout_ms passed.
+  void flush(uint32_t timeout_ms);
   // Moves the radio to a Wi-Fi channel (1-14); does nothing when already on it.
   void set_channel(uint8_t channel);
   // Pops received frames until one decodes cleanly; false once the queue is empty.
