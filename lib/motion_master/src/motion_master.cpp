@@ -4,14 +4,11 @@
 
 namespace sls {
 
-namespace {
-template <typename S>
-bool ranks_before(const S& a, const S& b) {
+bool MotionMaster::ranks_before(const Sensor& a, const Sensor& b) {
   if (a.points != b.points) return a.points > b.points;
   if (a.total_presence_ms != b.total_presence_ms) return a.total_presence_ms > b.total_presence_ms;
   return a.mac < b.mac;
 }
-}  // namespace
 
 MotionMaster::MotionMaster(const MotionMasterRecord& saved) : saved_(saved) {
   for (const SensorScore& score : saved.scores) {
@@ -91,7 +88,7 @@ std::optional<bool> MotionMaster::master_present() const {
 
 std::vector<Mac> MotionMaster::sorted_by_score() const {
   std::vector<Sensor> sorted = sensors_;
-  std::sort(sorted.begin(), sorted.end(), ranks_before<Sensor>);
+  std::sort(sorted.begin(), sorted.end(), ranks_before);
   std::vector<Mac> out;
   for (const auto& s : sorted) out.push_back(s.mac);
   return out;

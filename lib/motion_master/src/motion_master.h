@@ -54,6 +54,7 @@ class MotionMaster {
   Sensor& heard_from(const Mac& mac, uint32_t now_ms);
   bool silent(const Sensor& s) const;
   std::vector<Mac> sorted_by_score() const;
+  static bool ranks_before(const Sensor& a, const Sensor& b);  // points, then total presence, then lowest MAC
   std::vector<Sensor> sensors_;
   uint32_t now_ms_ = 0;  // latest time given
   std::vector<Mac> frozen_order_;  // ranking at the moment Calibration ended

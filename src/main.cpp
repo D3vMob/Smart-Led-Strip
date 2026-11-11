@@ -187,9 +187,12 @@ void report_presence_level(uint32_t now_ms) {
 void handle_double_press(uint32_t now_ms) {
   if (sensor.status(now_ms) != SensorStatus::Sensor) return;
   if (runs_election()) {
-    if (motion_master) motion_master->on_override(self_mac, now_ms);
+    if (!motion_master) return;
+    motion_master->on_override(self_mac, now_ms);
   } else {
-    espnow.send_all(group_sync->claim_override());
+    const std::vector<sls::Outgoing> claim = group_sync->claim_override();
+    if (claim.empty()) return;  // no Coordinator to claim from yet: no confirmation
+    espnow.send_all(claim);
   }
   flashing = true;
   flash_start_ms = now_ms;
@@ -345,13 +348,12 @@ void loop() {
   sls::Message message;
   sls::Mac from;
   while (espnow.poll(message, from, pairing->group_id())) {
-    if (message.type == sls::MessageType::State || message.type == sls::MessageType::Heartbeat ||
-        message.type == sls::MessageType::MatterSilent) {
-      handle_sync_message(message, from, now_ms);
-      continue;
-    }
     if (message.type == sls::MessageType::Presence || message.type == sls::MessageType::OverrideClaim) {
       handle_member_report(message, from, now_ms);
+      continue;
+    }
+    if (sls::is_sync_message(message.type)) {
+      handle_sync_message(message, from, now_ms);
       continue;
     }
     const sls::PairingInfo* info = std::get_if<sls::PairingInfo>(&message.body);
