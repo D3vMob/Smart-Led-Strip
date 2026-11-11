@@ -20,6 +20,7 @@ constexpr sls::Mac kBroadcast = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 struct Frame {
   uint8_t data[sls::kMaxMessageBytes];
   uint8_t length;
+  sls::Mac from;
 };
 
 // Single producer (Wi-Fi task) and single consumer (loop); a full ring drops new frames.
@@ -27,12 +28,14 @@ Frame ring[kRingSlots];
 volatile uint8_t ring_head = 0;
 volatile uint8_t ring_tail = 0;
 
-void on_receive(const esp_now_recv_info_t*, const uint8_t* data, int length) {
+void on_receive(const esp_now_recv_info_t* recv_info, const uint8_t* data, int length) {
+  if (recv_info == nullptr || recv_info->src_addr == nullptr) return;
   if (length <= 0 || length > static_cast<int>(sls::kMaxMessageBytes)) return;
   const uint8_t next = (ring_head + 1) % kRingSlots;
   if (next == ring_tail) return;
   std::memcpy(ring[ring_head].data, data, length);
   ring[ring_head].length = static_cast<uint8_t>(length);
+  std::memcpy(ring[ring_head].from.data(), recv_info->src_addr, ring[ring_head].from.size());
   ring_head = next;
 }
 
@@ -107,7 +110,7 @@ void EspNowLink::send_ack(const sls::Mac& to, uint32_t group_id, const sls::Mac&
   send(to, sls::Message{sls::MessageType::PairingAck, group_id, self, info});
 }
 
-bool EspNowLink::poll(sls::Message& out, uint32_t my_group_id) {
+bool EspNowLink::poll(sls::Message& out, sls::Mac& from, uint32_t my_group_id) {
   // Skips frames that don't decode (e.g. another Group's) so they never stall the ones behind.
   while (ring_tail != ring_head) {
     const Frame& frame = ring[ring_tail];
@@ -115,6 +118,7 @@ bool EspNowLink::poll(sls::Message& out, uint32_t my_group_id) {
     ring_tail = (ring_tail + 1) % kRingSlots;
     if (decoded.ok) {
       out = decoded.message;
+      from = frame.from;
       return true;
     }
   }

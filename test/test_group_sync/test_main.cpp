@@ -24,7 +24,7 @@ static void assert_same_state(const sls::GroupState& expected, const sls::GroupS
 static void deliver(std::vector<sls::GroupSync>& units, const std::vector<sls::Outgoing>& outgoing, uint32_t now_ms) {
   for (const sls::Outgoing& o : outgoing)
     for (size_t i = 0; i < units.size(); ++i)
-      if (kMacs[i] == o.to) units[i].on_message(o.message, now_ms);
+      if (kMacs[i] == o.to) units[i].on_message(o.message, o.message.sender, now_ms);
 }
 
 void test_a_change_on_the_coordinator_reaches_every_member() {
@@ -59,8 +59,8 @@ void test_a_member_drops_a_state_with_an_older_sequence() {
   std::vector<sls::Outgoing> msgs_a = coordinator.on_local_change(a, 1000);
   std::vector<sls::Outgoing> msgs_b = coordinator.on_local_change(b, 1100);
 
-  for (const sls::Outgoing& o : msgs_b) if (o.to == kMacs[1]) member.on_message(o.message, 1200);
-  for (const sls::Outgoing& o : msgs_a) if (o.to == kMacs[1]) member.on_message(o.message, 1300);
+  for (const sls::Outgoing& o : msgs_b) if (o.to == kMacs[1]) member.on_message(o.message, o.message.sender, 1200);
+  for (const sls::Outgoing& o : msgs_a) if (o.to == kMacs[1]) member.on_message(o.message, o.message.sender, 1300);
 
   assert_same_state(b, member.state());
 }
@@ -78,9 +78,9 @@ void test_a_member_accepts_a_newer_sequence_across_32_bit_wrap_around() {
   sls::GroupState b = sls::apply(a, sls::Command::set_hue_sat(200, 80));
   sls::GroupState c = sls::apply(a, sls::Command::set_hue_sat(10, 30));
 
-  member.on_message(state_message(a, 0xFFFFFFFFu), 1000);
-  member.on_message(state_message(b, 1), 1100);
-  member.on_message(state_message(c, 0xFFFFFFFEu), 1200);
+  member.on_message(state_message(a, 0xFFFFFFFFu), kMacs[0], 1000);
+  member.on_message(state_message(b, 1), kMacs[0], 1100);
+  member.on_message(state_message(c, 0xFFFFFFFEu), kMacs[0], 1200);
 
   assert_same_state(b, member.state());
 }
@@ -128,7 +128,7 @@ void test_a_member_hearing_a_heartbeat_records_when() {
   sls::GroupSync member(kMacs[1], kGroupId, table, sls::SyncRole::Member, sls::default_group_state());
   sls::Message heartbeat{sls::MessageType::Heartbeat, kGroupId, kMacs[0],
                          sls::StateSync{sls::default_group_state(), 5, 0, 6}};
-  member.on_message(heartbeat, 2345);
+  member.on_message(heartbeat, kMacs[0], 2345);
   TEST_ASSERT_EQUAL(2345, member.last_heard_ms());
 }
 
@@ -147,7 +147,7 @@ void test_a_member_that_missed_a_state_catches_up_on_the_next_heartbeat() {
   changed = sls::apply(changed, sls::Command::set_hue_sat(200, 80));
 
   for (const sls::Outgoing& o : units[0].on_local_change(changed, 1000))
-    if (o.to == kMacs[2]) units[2].on_message(o.message, 1000);
+    if (o.to == kMacs[2]) units[2].on_message(o.message, o.message.sender, 1000);
   TEST_ASSERT_FALSE(units[1].state().open);
 
   deliver(units, units[0].on_tick(2000, 6), 2000);
@@ -161,21 +161,21 @@ void test_a_member_follows_a_rebooted_coordinator_after_its_next_heartbeat() {
   sls::GroupState initial = sls::default_group_state();
   sls::GroupSync member(kMacs[1], kGroupId, table, sls::SyncRole::Member, initial);
   sls::GroupState old_state = sls::apply(initial, sls::Command::open());
-  member.on_message(state_message(old_state, 57), 1000);
+  member.on_message(state_message(old_state, 57), kMacs[0], 1000);
 
   sls::GroupSync rebooted(kMacs[0], kGroupId, table, sls::SyncRole::Coordinator, initial);
   sls::GroupState first = sls::apply(initial, sls::Command::set_hue_sat(200, 80));
   for (const sls::Outgoing& o : rebooted.on_local_change(first, 5000))
-    if (o.to == kMacs[1]) member.on_message(o.message, 5000);
+    if (o.to == kMacs[1]) member.on_message(o.message, o.message.sender, 5000);
   assert_same_state(old_state, member.state());
 
   for (const sls::Outgoing& o : rebooted.on_tick(6000, 6))
-    if (o.to == kMacs[1]) member.on_message(o.message, 6000);
+    if (o.to == kMacs[1]) member.on_message(o.message, o.message.sender, 6000);
   assert_same_state(first, member.state());
 
   sls::GroupState second = sls::apply(first, sls::Command::set_hue_sat(10, 30));
   for (const sls::Outgoing& o : rebooted.on_local_change(second, 7000))
-    if (o.to == kMacs[1]) member.on_message(o.message, 7000);
+    if (o.to == kMacs[1]) member.on_message(o.message, o.message.sender, 7000);
   assert_same_state(second, member.state());
 }
 
@@ -188,7 +188,7 @@ void test_a_rebooted_member_catches_up_on_the_next_heartbeat() {
 
   sls::GroupSync rebooted(kMacs[1], kGroupId, table, sls::SyncRole::Member, initial);
   for (const sls::Outgoing& o : coordinator.on_tick(2000, 6))
-    if (o.to == kMacs[1]) rebooted.on_message(o.message, 2000);
+    if (o.to == kMacs[1]) rebooted.on_message(o.message, o.message.sender, 2000);
 
   assert_same_state(changed, rebooted.state());
 }
@@ -206,27 +206,27 @@ static sls::Message heartbeat_with_phase(uint32_t seq, uint32_t phase_ms) {
 static sls::GroupSync blinking_member() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupSync member(kMacs[1], kGroupId, table, sls::SyncRole::Member, sls::default_group_state());
-  member.on_message(state_message(blinking_state(), 1), 0);
+  member.on_message(state_message(blinking_state(), 1), kMacs[0], 0);
   return member;
 }
 
 void test_a_member_realigns_its_blink_clock_when_drift_exceeds_the_threshold() {
   sls::GroupSync member = blinking_member();
-  member.on_message(heartbeat_with_phase(1, 25), 5000);
+  member.on_message(heartbeat_with_phase(1, 25), kMacs[0], 5000);
   TEST_ASSERT_EQUAL(25, member.blink_phase_ms(5000));
   TEST_ASSERT_EQUAL(125, member.blink_phase_ms(5100));
 }
 
 void test_a_member_leaves_its_blink_clock_alone_when_drift_is_within_the_threshold() {
   sls::GroupSync member = blinking_member();
-  member.on_message(heartbeat_with_phase(1, 15), 5000);
+  member.on_message(heartbeat_with_phase(1, 15), kMacs[0], 5000);
   TEST_ASSERT_EQUAL(0, member.blink_phase_ms(5000));
 }
 
 void test_blink_drift_is_measured_around_the_period() {
   sls::GroupSync member = blinking_member();
   TEST_ASSERT_EQUAL(990, member.blink_phase_ms(4990));
-  member.on_message(heartbeat_with_phase(1, 5), 4990);
+  member.on_message(heartbeat_with_phase(1, 5), kMacs[0], 4990);
   TEST_ASSERT_EQUAL(990, member.blink_phase_ms(4990));
 }
 
@@ -235,12 +235,12 @@ void test_a_member_blinks_in_step_with_the_coordinator_after_the_first_heartbeat
   sls::GroupSync coordinator(kMacs[0], kGroupId, table, sls::SyncRole::Coordinator, sls::default_group_state());
   sls::GroupSync member(kMacs[1], kGroupId, table, sls::SyncRole::Member, sls::default_group_state());
   for (const sls::Outgoing& o : coordinator.on_local_change(blinking_state(), 0))
-    if (o.to == kMacs[1]) member.on_message(o.message, 0);
-  member.on_message(heartbeat_with_phase(1, 300), 1000);  // knocks the Member's clock off
+    if (o.to == kMacs[1]) member.on_message(o.message, o.message.sender, 0);
+  member.on_message(heartbeat_with_phase(1, 300), kMacs[0], 1000);  // knocks the Member's clock off
   TEST_ASSERT_NOT_EQUAL(coordinator.blink_phase_ms(1000), member.blink_phase_ms(1000));
 
   for (const sls::Outgoing& o : coordinator.on_tick(2000, 6))
-    if (o.to == kMacs[1]) member.on_message(o.message, 2000);
+    if (o.to == kMacs[1]) member.on_message(o.message, o.message.sender, 2000);
 
   for (uint32_t t = 2000; t <= 3500; t += 250) {
     int32_t diff = static_cast<int32_t>(member.blink_phase_ms(t)) - static_cast<int32_t>(coordinator.blink_phase_ms(t));
@@ -283,7 +283,7 @@ void test_the_first_commissioned_unit_becomes_coordinator_and_silences_the_other
 
 void test_a_coordinator_stays_coordinator_when_it_hears_matter_silent() {
   std::vector<sls::GroupSync> units = make_units(sls::SyncRole::Coordinator);
-  units[0].on_message(sls::Message{sls::MessageType::MatterSilent, kGroupId, kMacs[1], std::monostate{}}, 1000);
+  units[0].on_message(sls::Message{sls::MessageType::MatterSilent, kGroupId, kMacs[1], std::monostate{}}, kMacs[1], 1000);
   TEST_ASSERT_EQUAL(static_cast<int>(sls::SyncRole::Coordinator), static_cast<int>(units[0].role()));
   TEST_ASSERT_TRUE(units[0].matter_enabled());
 }
@@ -309,11 +309,46 @@ void test_a_unit_ignores_messages_from_another_group() {
   std::vector<sls::GroupSync> units = make_units(sls::SyncRole::Undecided);
   const uint32_t other_group = kGroupId + 1;
   sls::GroupState changed = sls::apply(sls::default_group_state(), sls::Command::open());
-  units[1].on_message(sls::Message{sls::MessageType::State, other_group, kMacs[0], sls::StateSync{changed, 7, 0, 6}}, 1000);
-  units[1].on_message(sls::Message{sls::MessageType::MatterSilent, other_group, kMacs[0], std::monostate{}}, 1000);
+  units[1].on_message(sls::Message{sls::MessageType::State, other_group, kMacs[0], sls::StateSync{changed, 7, 0, 6}}, kMacs[0], 1000);
+  units[1].on_message(sls::Message{sls::MessageType::MatterSilent, other_group, kMacs[0], std::monostate{}}, kMacs[0], 1000);
   TEST_ASSERT_FALSE(units[1].state().open);
   TEST_ASSERT_EQUAL(static_cast<int>(sls::SyncRole::Undecided), static_cast<int>(units[1].role()));
   TEST_ASSERT_TRUE(units[1].matter_enabled());
+}
+
+void test_a_sync_message_from_a_sender_outside_the_group_is_ignored() {
+  std::vector<sls::GroupSync> units = make_units(sls::SyncRole::Undecided);
+  const sls::Mac stranger = {0x02, 0, 0, 0, 0, 0x99};
+  sls::GroupState changed = sls::apply(sls::default_group_state(), sls::Command::open());
+
+  const bool silent = units[1].on_message(sls::Message{sls::MessageType::MatterSilent, kGroupId, stranger, std::monostate{}}, stranger, 1000);
+  const bool state = units[1].on_message(sls::Message{sls::MessageType::State, kGroupId, stranger, sls::StateSync{changed, 7, 0, 6}}, stranger, 1100);
+  const bool heartbeat = units[1].on_message(sls::Message{sls::MessageType::Heartbeat, kGroupId, stranger, sls::StateSync{changed, 8, 0, 6}}, stranger, 1200);
+
+  TEST_ASSERT_FALSE(silent);
+  TEST_ASSERT_FALSE(state);
+  TEST_ASSERT_FALSE(heartbeat);
+  TEST_ASSERT_FALSE(units[1].state().open);
+  TEST_ASSERT_EQUAL(static_cast<int>(sls::SyncRole::Undecided), static_cast<int>(units[1].role()));
+  TEST_ASSERT_TRUE(units[1].matter_enabled());
+  TEST_ASSERT_EQUAL(0, units[1].last_heard_ms());
+}
+
+void test_a_sync_message_whose_source_differs_from_its_claimed_sender_is_ignored() {
+  std::vector<sls::GroupSync> units = make_units(sls::SyncRole::Undecided);
+  sls::GroupState changed = sls::apply(sls::default_group_state(), sls::Command::open());
+
+  const bool silent = units[1].on_message(sls::Message{sls::MessageType::MatterSilent, kGroupId, kMacs[0], std::monostate{}}, kMacs[2], 1000);
+  const bool state = units[1].on_message(sls::Message{sls::MessageType::State, kGroupId, kMacs[0], sls::StateSync{changed, 7, 0, 6}}, kMacs[2], 1100);
+  const bool heartbeat = units[1].on_message(sls::Message{sls::MessageType::Heartbeat, kGroupId, kMacs[0], sls::StateSync{changed, 8, 0, 6}}, kMacs[2], 1200);
+
+  TEST_ASSERT_FALSE(silent);
+  TEST_ASSERT_FALSE(state);
+  TEST_ASSERT_FALSE(heartbeat);
+  TEST_ASSERT_FALSE(units[1].state().open);
+  TEST_ASSERT_EQUAL(static_cast<int>(sls::SyncRole::Undecided), static_cast<int>(units[1].role()));
+  TEST_ASSERT_TRUE(units[1].matter_enabled());
+  TEST_ASSERT_EQUAL(0, units[1].last_heard_ms());
 }
 
 void test_an_undecided_unit_applies_a_local_change_but_relays_nothing() {
@@ -326,8 +361,8 @@ void test_an_undecided_unit_applies_a_local_change_but_relays_nothing() {
 void test_a_stale_state_still_counts_as_hearing_the_coordinator() {
   std::vector<sls::GroupSync> units = make_units(sls::SyncRole::Member);
   sls::GroupState a = sls::apply(sls::default_group_state(), sls::Command::open());
-  units[1].on_message(state_message(a, 5), 1000);
-  units[1].on_message(state_message(sls::default_group_state(), 4), 2500);
+  units[1].on_message(state_message(a, 5), kMacs[0], 1000);
+  units[1].on_message(state_message(sls::default_group_state(), 4), kMacs[0], 2500);
   TEST_ASSERT_EQUAL(2500, units[1].last_heard_ms());
   assert_same_state(a, units[1].state());
 }
@@ -355,8 +390,8 @@ void test_the_coordinator_ignores_states_and_heartbeats_it_receives() {
   const uint32_t phase_before = units[0].blink_phase_ms(5000);
 
   sls::GroupState other = sls::apply(sls::default_group_state(), sls::Command::set_hue_sat(200, 80));
-  units[0].on_message(state_message(other, 50), 4000);
-  units[0].on_message(sls::Message{sls::MessageType::Heartbeat, kGroupId, kMacs[1], sls::StateSync{other, 60, 300, 6}}, 5000);
+  units[0].on_message(sls::Message{sls::MessageType::State, kGroupId, kMacs[1], sls::StateSync{other, 50, 0, 0}}, kMacs[1], 4000);
+  units[0].on_message(sls::Message{sls::MessageType::Heartbeat, kGroupId, kMacs[1], sls::StateSync{other, 60, 300, 6}}, kMacs[1], 5000);
 
   assert_same_state(mine, units[0].state());
   TEST_ASSERT_EQUAL(phase_before, units[0].blink_phase_ms(5000));
@@ -370,7 +405,7 @@ void test_an_undecided_unit_that_hears_a_state_becomes_a_member() {
   sls::GroupState changed = sls::apply(initial, sls::Command::open());
 
   for (const sls::Outgoing& o : coordinator.on_local_change(changed, 1000))
-    if (o.to == kMacs[1]) undecided.on_message(o.message, 1000);
+    if (o.to == kMacs[1]) undecided.on_message(o.message, o.message.sender, 1000);
 
   TEST_ASSERT_EQUAL(static_cast<int>(sls::SyncRole::Member), static_cast<int>(undecided.role()));
   TEST_ASSERT_FALSE(undecided.matter_enabled());
@@ -385,7 +420,7 @@ void test_an_undecided_unit_that_hears_a_heartbeat_becomes_a_member() {
   coordinator.on_local_change(sls::apply(initial, sls::Command::open()), 500);
 
   for (const sls::Outgoing& o : coordinator.on_tick(1000, 6))
-    if (o.to == kMacs[1]) undecided.on_message(o.message, 1000);
+    if (o.to == kMacs[1]) undecided.on_message(o.message, o.message.sender, 1000);
 
   TEST_ASSERT_EQUAL(static_cast<int>(sls::SyncRole::Member), static_cast<int>(undecided.role()));
   TEST_ASSERT_FALSE(undecided.matter_enabled());
@@ -449,8 +484,41 @@ void test_an_undecided_unit_hunts_again_once_commissioning_stops() {
   TEST_ASSERT_EQUAL(1, units[2].listen_channel(6000));
 }
 
+void test_an_undecided_unit_alone_in_its_group_never_becomes_a_member() {
+  sls::GroupState initial = sls::default_group_state();
+  sls::GroupState other = sls::default_group_state();
+  other.open = !initial.open;
+  sls::GroupSync alone(kMacs[0], kGroupId, std::vector<sls::Mac>{kMacs[0]}, sls::SyncRole::Undecided, initial);
+  sls::Message silent{sls::MessageType::MatterSilent, kGroupId, kMacs[1], {}};
+  TEST_ASSERT_FALSE(alone.on_message(silent, kMacs[1], 1000));
+  TEST_ASSERT_FALSE(alone.on_message(state_message(other, 1), kMacs[1], 1100));
+  sls::Message heartbeat{sls::MessageType::Heartbeat, kGroupId, kMacs[1], sls::StateSync{other, 2, 0, 6}};
+  TEST_ASSERT_FALSE(alone.on_message(heartbeat, kMacs[1], 1200));
+  TEST_ASSERT_EQUAL(sls::SyncRole::Undecided, alone.role());
+  TEST_ASSERT_TRUE(alone.matter_enabled());
+  assert_same_state(initial, alone.state());
+  TEST_ASSERT_EQUAL(0, alone.last_heard_ms());
+}
+
+void test_once_it_follows_a_coordinator_a_member_ignores_state_and_heartbeat_from_another_member() {
+  std::vector<sls::Mac> table(kMacs, kMacs + 3);
+  sls::GroupSync member(kMacs[1], kGroupId, table, sls::SyncRole::Member, sls::default_group_state());
+  sls::GroupState coordinators = sls::default_group_state();
+  coordinators.open = true;
+  TEST_ASSERT_TRUE(member.on_message(sls::Message{sls::MessageType::Heartbeat, kGroupId, kMacs[0], sls::StateSync{coordinators, 5, 0, 6}},
+                                     kMacs[0], 1000));
+  sls::GroupState other = coordinators;
+  other.open = false;
+  TEST_ASSERT_FALSE(member.on_message(sls::Message{sls::MessageType::State, kGroupId, kMacs[2], sls::StateSync{other, 9, 0, 0}}, kMacs[2], 2000));
+  TEST_ASSERT_FALSE(member.on_message(sls::Message{sls::MessageType::Heartbeat, kGroupId, kMacs[2], sls::StateSync{other, 9, 0, 6}}, kMacs[2], 3000));
+  assert_same_state(coordinators, member.state());
+  TEST_ASSERT_EQUAL(1000, member.last_heard_ms());
+  TEST_ASSERT_TRUE(member.on_message(sls::Message{sls::MessageType::Heartbeat, kGroupId, kMacs[0], sls::StateSync{other, 5, 0, 6}}, kMacs[0], 4000));
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_once_it_follows_a_coordinator_a_member_ignores_state_and_heartbeat_from_another_member);
   RUN_TEST(test_a_member_that_hears_nothing_hunts_across_the_channels_after_six_seconds);
   RUN_TEST(test_the_coordinator_ignores_states_and_heartbeats_it_receives);
   RUN_TEST(test_a_local_change_equal_to_the_current_state_is_a_no_op);
@@ -462,6 +530,8 @@ int main() {
   RUN_TEST(test_a_persisted_coordinator_sends_heartbeats_without_being_commissioned_again);
   RUN_TEST(test_a_member_never_relays_a_local_change);
   RUN_TEST(test_a_unit_ignores_messages_from_another_group);
+  RUN_TEST(test_a_sync_message_from_a_sender_outside_the_group_is_ignored);
+  RUN_TEST(test_a_sync_message_whose_source_differs_from_its_claimed_sender_is_ignored);
   RUN_TEST(test_a_member_realigns_its_blink_clock_when_drift_exceeds_the_threshold);
   RUN_TEST(test_a_member_leaves_its_blink_clock_alone_when_drift_is_within_the_threshold);
   RUN_TEST(test_blink_drift_is_measured_around_the_period);
@@ -483,5 +553,6 @@ int main() {
   RUN_TEST(test_a_unit_alone_in_its_group_never_hunts);
   RUN_TEST(test_an_undecided_unit_being_commissioned_never_moves_the_radio);
   RUN_TEST(test_an_undecided_unit_hunts_again_once_commissioning_stops);
+  RUN_TEST(test_an_undecided_unit_alone_in_its_group_never_becomes_a_member);
   return UNITY_END();
 }

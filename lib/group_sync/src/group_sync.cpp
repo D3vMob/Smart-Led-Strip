@@ -1,5 +1,6 @@
 #include "group_sync.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace sls {
@@ -61,16 +62,22 @@ void GroupSync::realign_blink(const StateSync& sync, uint32_t now_ms) {
   if (drift > kBlinkRealignMs) blink_clock_.align(now_ms, theirs);
 }
 
-void GroupSync::on_message(const Message& message, uint32_t now_ms) {
-  if (message.group_id != group_id_) return;
+bool GroupSync::on_message(const Message& message, const Mac& from, uint32_t now_ms) {
+  if (members_.size() <= 1) return false;  // a Unit alone in its Group has no one to sync with
+  if (message.group_id != group_id_) return false;
+  if (from == self_ || std::find(members_.begin(), members_.end(), from) == members_.end()) return false;
+  if (from != message.sender) return false;  // the radio source must be the claimed sender
+  if (role_ == SyncRole::Coordinator) return false;  // the Coordinator owns the Group state
+  if (coordinator_ && *coordinator_ != from) return false;  // only the Coordinator we follow
   if (message.type == MessageType::MatterSilent) {
-    if (role_ != SyncRole::Coordinator) role_ = SyncRole::Member;
-    return;
+    coordinator_ = from;
+    role_ = SyncRole::Member;
+    return true;
   }
-  if (message.type != MessageType::State && message.type != MessageType::Heartbeat) return;
-  if (role_ == SyncRole::Coordinator) return;  // the Coordinator owns the Group state
+  if (message.type != MessageType::State && message.type != MessageType::Heartbeat) return false;
   const StateSync* sync = std::get_if<StateSync>(&message.body);
-  if (!sync) return;
+  if (!sync) return false;
+  coordinator_ = from;
   role_ = SyncRole::Member;  // hearing the Coordinator settles an Undecided Unit
   last_heard_ms_ = now_ms;
   // A Heartbeat is the Coordinator's current truth, so it always applies, which
@@ -79,11 +86,12 @@ void GroupSync::on_message(const Message& message, uint32_t now_ms) {
   if (message.type == MessageType::Heartbeat) {
     realign_blink(*sync, now_ms);
   } else if (heard_any_ && !seq_is_newer(sync->seq, last_seq_)) {
-    return;
+    return true;  // stale, but it still counted as hearing the Coordinator
   }
   heard_any_ = true;
   last_seq_ = sync->seq;
   state_ = sync->state;
+  return true;
 }
 
 SyncRole GroupSync::role() const { return role_; }

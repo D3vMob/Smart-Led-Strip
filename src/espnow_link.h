@@ -19,7 +19,8 @@ class EspNowLink {
   // Moves the radio to a Wi-Fi channel (1-14); does nothing when already on it.
   void set_channel(uint8_t channel);
   // Pops received frames until one decodes cleanly; false once the queue is empty.
-  bool poll(sls::Message& out, uint32_t my_group_id);
+  // `from` is the frame's radio source MAC, which the sender field inside the message is not.
+  bool poll(sls::Message& out, sls::Mac& from, uint32_t my_group_id);
   sls::Mac self_mac() const;
 
  private:

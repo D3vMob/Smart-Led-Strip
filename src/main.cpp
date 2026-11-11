@@ -71,11 +71,14 @@ void build_group_sync(sls::SyncRole role) {
   group_sync = std::make_unique<sls::GroupSync>(self_mac, pairing->group_id(), pairing->members(), role, group_state);
 }
 
-void handle_sync_message(const sls::Message& message, uint32_t now_ms) {
+void handle_sync_message(const sls::Message& message, const sls::Mac& from, uint32_t now_ms) {
   const sls::SyncRole before = group_sync->role();
-  group_sync->on_message(message, now_ms);
+  const bool applied = group_sync->on_message(message, from, now_ms);
   const sls::StateSync* sync = std::get_if<sls::StateSync>(&message.body);
-  if (message.type == sls::MessageType::Heartbeat && sync != nullptr && group_sync->role() == sls::SyncRole::Member) {
+  // The channel comes off the air, so never trust it beyond the channels hunted.
+  if (applied && message.type == sls::MessageType::Heartbeat && sync != nullptr &&
+      group_sync->role() == sls::SyncRole::Member && sync->wifi_channel >= 1 &&
+      sync->wifi_channel <= sls::kChannelHuntLast) {
     espnow.set_channel(sync->wifi_channel);
   }
   if (before != sls::SyncRole::Member && group_sync->role() == sls::SyncRole::Member) {
@@ -135,10 +138,11 @@ void loop() {
     apply_pairing_actions(pairing->on_long_press(now_ms), now_ms);
   }
   sls::Message message;
-  while (espnow.poll(message, pairing->group_id())) {
+  sls::Mac from;
+  while (espnow.poll(message, from, pairing->group_id())) {
     if (message.type == sls::MessageType::State || message.type == sls::MessageType::Heartbeat ||
         message.type == sls::MessageType::MatterSilent) {
-      handle_sync_message(message, now_ms);
+      handle_sync_message(message, from, now_ms);
       continue;
     }
     const sls::PairingInfo* info = std::get_if<sls::PairingInfo>(&message.body);

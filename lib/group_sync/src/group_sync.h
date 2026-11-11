@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "blink.h"
@@ -47,7 +48,13 @@ class GroupSync {
   std::vector<Outgoing> on_tick(uint32_t now_ms, uint8_t wifi_channel);
   // State, Heartbeat and MatterSilent from this Group; anything else is ignored.
   // Hearing any of them turns an Undecided Unit into a Member; a Coordinator keeps its role.
-  void on_message(const Message& message, uint32_t now_ms);
+  // Accepted only when: this Unit has other Group members, from (the radio source MAC)
+  // is a Group member other than this Unit and equals message.sender. A Member
+  // learns its Coordinator from the first MatterSilent, State or Heartbeat it
+  // accepts (not persisted) and from then on ignores all of them from anyone else.
+  // Ignored messages have no effect at all.
+  // Returns true when the message was applied, false when it was ignored.
+  bool on_message(const Message& message, const Mac& from, uint32_t now_ms);
 
   // Matter commissioning is scanning for or joining the router; the radio must
   // not move meanwhile, so listen_channel returns 0 until it stops.
@@ -84,6 +91,7 @@ class GroupSync {
   bool sent_heartbeat_ = false;
   uint32_t last_heartbeat_ms_ = 0;
   // Member side.
+  std::optional<Mac> coordinator_;  // learned from the first accepted message
   bool heard_any_ = false;
   uint32_t last_seq_ = 0;
   uint32_t last_heard_ms_ = 0;
