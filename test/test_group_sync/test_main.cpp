@@ -758,7 +758,7 @@ void test_after_re_pairing_only_frames_signed_with_the_new_group_secret_are_hear
 void test_a_member_ignores_a_correctly_signed_presence_or_override_claim() {
   std::vector<sls::Mac> table(kMacs, kMacs + 3);
   sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, sls::default_group_state());
-  sls::Message presence = signed_msg(sls::Message{sls::MessageType::Presence, kGroupId, kMacs[0], sls::Presence{true, 500, false}});
+  sls::Message presence = signed_msg(sls::Message{sls::MessageType::Presence, kGroupId, kMacs[0], sls::Presence{true, 500, false, false}});
   sls::Message claim = signed_msg(sls::Message{sls::MessageType::OverrideClaim, kGroupId, kMacs[0], std::monostate{}});
   TEST_ASSERT_FALSE(member.on_message(presence, kMacs[0], 1000) || member.on_message(claim, kMacs[0], 1100));
 }

@@ -15,7 +15,7 @@
 #include "ld2410_uart.h"
 #include "matter_endpoints.h"
 #include "motion_master.h"
-#include "motion_rules.h"
+#include "motion_feed.h"
 #include "pairing.h"
 #include "save_scheduler.h"
 #include "state_store.h"
@@ -60,9 +60,7 @@ std::unique_ptr<sls::MotionMaster> motion_master;
 bool motion_master_loaded = false;  // built from flash (Coordinator) rather than fresh in RAM
 sls::MotionMasterRecord saved_motion_record;
 std::optional<sls::Mac> reported_master;
-std::optional<bool> reported_motion_presence;
-sls::MotionRules motion_rules;
-bool rules_motion_enabled = false;
+sls::MotionFeed motion_feed;
 // Member side, while the Coordinator is silent: the Motion master's latest presence level.
 std::optional<bool> member_presence;
 
@@ -114,7 +112,7 @@ void ensure_motion_master() {
   motion_master = std::make_unique<sls::MotionMaster>(saved_motion_record);
   motion_master_loaded = coordinator;
   reported_master.reset();
-  reported_motion_presence.reset();
+  motion_feed.forget_presence();
 }
 
 // Saves the Coordinator's record when more than the running presence totals changed.
@@ -143,21 +141,16 @@ void apply_motion_intent(sls::MotionIntent intent) {
   if (intent == sls::MotionIntent::Close) group_state = sls::apply(group_state, sls::Command::close());
 }
 
+void feed_motion_rules(std::optional<bool> presence, uint32_t now_ms) {
+  apply_motion_intent(motion_feed.feed(group_state.motion_enabled, presence, now_ms));
+}
+
 // Motion rules follow the master's presence and open or close the Strip.
 void run_motion_rules(uint32_t now_ms) {
   if (!motion_master) return;
   motion_master->on_tick(now_ms);
   report_master_change();
-  if (group_state.motion_enabled != rules_motion_enabled) {
-    rules_motion_enabled = group_state.motion_enabled;
-    motion_rules.on_motion_enabled(rules_motion_enabled, now_ms);
-  }
-  const std::optional<bool> motion_presence = motion_master->motion_presence();
-  if (motion_presence && motion_presence != reported_motion_presence) {
-    apply_motion_intent(motion_rules.on_presence(*motion_presence, now_ms));
-  }
-  reported_motion_presence = motion_presence;
-  apply_motion_intent(motion_rules.on_tick(now_ms));
+  feed_motion_rules(motion_master->motion_presence(), now_ms);
   save_motion_master_if_changed();
 }
 
@@ -167,15 +160,7 @@ void run_member_motion_rules(uint32_t now_ms) {
   if (group_sync->motion_master() == self_mac && sensor.status(now_ms) == SensorStatus::Sensor) {
     member_presence = sensor_present;
   }
-  if (group_state.motion_enabled != rules_motion_enabled) {
-    rules_motion_enabled = group_state.motion_enabled;
-    motion_rules.on_motion_enabled(rules_motion_enabled, now_ms);
-  }
-  if (member_presence && member_presence != reported_motion_presence) {
-    apply_motion_intent(motion_rules.on_presence(*member_presence, now_ms));
-  }
-  reported_motion_presence = member_presence;
-  apply_motion_intent(motion_rules.on_tick(now_ms));
+  feed_motion_rules(member_presence, now_ms);
 }
 
 bool same_look(const sls::Look& a, const sls::Look& b) {
@@ -263,7 +248,8 @@ void handle_member_report(const sls::Message& message, const sls::Mac& from, uin
     motion_master->on_presence_report(message.sender, report->present, report->total_presence_ms, now_ms);
     // The Coordinator returned and heard the Motion master: adopt its Open/Closed, the next local
     // change check then sees no change and the Heartbeat carries it out.
-    if (group_sync->on_master_presence(message.sender, report->open, motion_master->master(), now_ms)) {
+    if (group_sync->on_master_presence(message.sender, report->open, report->coordinator_silent,
+                                       motion_master->master(), now_ms)) {
       group_state.open = group_sync->state().open;
     }
   } else if (message.type == sls::MessageType::OverrideClaim) {
@@ -420,9 +406,9 @@ void loop() {
     const sls::Look look_before = group_state.look;
     matter_endpoints::sync(group_state);
     if (was_open && !group_state.open) {
-      motion_rules.on_manual_close();
+      motion_feed.on_manual_close();
     } else if (group_state.open && !same_look(look_before, group_state.look)) {
-      motion_rules.on_explicit_open();
+      motion_feed.on_explicit_open();
     }
     if (matter_endpoints::commissioned() && group_sync->role() != sls::SyncRole::Coordinator) {
       espnow.send_all(group_sync->on_commissioned(now_ms));
@@ -435,7 +421,7 @@ void loop() {
       run_member_motion_rules(now_ms);  // no Coordinator: follow motion locally
     } else {
       member_presence.reset();
-      reported_motion_presence.reset();
+      motion_feed.seed_next();
       group_state = group_sync->state();  // the Coordinator owns the state
     }
   }

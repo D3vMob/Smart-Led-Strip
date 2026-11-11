@@ -12,7 +12,7 @@ constexpr size_t kTypeOffset = 3;
 constexpr size_t kGroupOffset = 4;
 constexpr size_t kSenderOffset = 8;
 constexpr size_t kHeaderBytes = kSenderOffset + 6;
-constexpr size_t kPresenceBodyBytes = 1 + 4 + 1;
+constexpr size_t kPresenceBodyBytes = 1 + 4 + 1 + 1;
 constexpr size_t kChannelMovedBodyBytes = 1;
 // Pairing body: window age (4), member count (1) and nonce (16), then 6 bytes per member.
 constexpr size_t kPairingCountOffset = 4;
@@ -167,6 +167,7 @@ size_t encode(const Message& message, uint8_t* out, size_t capacity) {
       b[0] = presence->present ? 1 : 0;
       put32(b + 1, presence->total_presence_ms);
       b[5] = presence->open ? 1 : 0;
+      b[6] = presence->coordinator_silent ? 1 : 0;
       break;
     case MessageType::ChannelMoved:
       b[0] = moved->channel;
@@ -259,7 +260,7 @@ Decoded decode(const uint8_t* buf, size_t len, uint32_t my_group_id) {
       result.message.body = get_state_body(b);
       break;
     case MessageType::Presence:
-      result.message.body = Presence{b[0] != 0, get32(b + 1), b[5] != 0};
+      result.message.body = Presence{b[0] != 0, get32(b + 1), b[5] != 0, b[6] != 0};
       break;
     case MessageType::ChannelMoved:
       result.message.body = ChannelMoved{b[0]};

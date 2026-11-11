@@ -105,7 +105,7 @@ static void check_presence_round_trip(bool present, uint32_t total_ms) {
   message.type = sls::MessageType::Presence;
   message.group_id = 0x0BADF00D;
   message.sender = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
-  message.body = sls::Presence{present, total_ms};
+  message.body = sls::Presence{present, total_ms, false, false};
 
   uint8_t buf[sls::kMaxMessageBytes];
   size_t n = sls::encode(message, buf, sizeof(buf));
@@ -247,7 +247,7 @@ static sls::Message sample_message(sls::MessageType type) {
       break;
     }
     case sls::MessageType::Presence:
-      message.body = sls::Presence{true, 1000};
+      message.body = sls::Presence{true, 1000, false, false};
       break;
     case sls::MessageType::ChannelMoved:
       message.body = sls::ChannelMoved{6};
@@ -413,7 +413,7 @@ void test_encode_rejects_body_that_does_not_match_the_type() {
   uint8_t buf[sls::kMaxMessageBytes];
 
   sls::Message state_with_presence_body = sample_message(sls::MessageType::State);
-  state_with_presence_body.body = sls::Presence{true, 5};
+  state_with_presence_body.body = sls::Presence{true, 5, false, false};
   TEST_ASSERT_EQUAL_UINT32(0, sls::encode(state_with_presence_body, buf, sizeof(buf)));
 
   sls::Message presence_with_empty_body = sample_message(sls::MessageType::Presence);
@@ -694,8 +694,25 @@ void test_presence_round_trips_the_senders_group_open_state() {
   }
 }
 
+void test_presence_round_trips_the_coordinator_silent_flag() {
+  const bool flags[] = {true, false};
+  for (bool flag : flags) {
+    sls::Message message = sample_message(sls::MessageType::Presence);
+    std::get<sls::Presence>(message.body).coordinator_silent = flag;
+    uint8_t buf[sls::kMaxMessageBytes];
+    size_t n = sls::encode(message, buf, sizeof(buf));
+    TEST_ASSERT_GREATER_THAN(0, n);
+    sls::Decoded decoded = sls::decode(buf, n, 0x12345678);
+    TEST_ASSERT_TRUE(decoded.ok);
+    const sls::Presence* got = std::get_if<sls::Presence>(&decoded.message.body);
+    TEST_ASSERT_NOT_NULL(got);
+    TEST_ASSERT_EQUAL(flag, got->coordinator_silent);
+  }
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_presence_round_trips_the_coordinator_silent_flag);
   RUN_TEST(test_state_message_round_trips_with_every_field_intact);
   RUN_TEST(test_state_and_heartbeat_round_trip_the_motion_master_when_set_and_when_none);
   RUN_TEST(test_sync_messages_keep_their_auth_fields_across_encode_and_decode);

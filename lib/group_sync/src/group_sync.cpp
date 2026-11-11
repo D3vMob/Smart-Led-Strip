@@ -56,7 +56,10 @@ std::vector<Outgoing> GroupSync::on_commissioned(uint32_t) {
 
 std::vector<Outgoing> GroupSync::on_local_change(const GroupState& state, uint32_t now_ms) {
   if (role_ == SyncRole::Member) {
-    if (silent(now_ms)) state_ = state;  // keeps the last state and its motion changes, relays nothing
+    if (silent(now_ms)) {  // keeps the last state and its motion changes, relays nothing
+      if (state.open != state_.open) open_changed_locally_ = true;
+      state_ = state;
+    }
     return {};
   }
   if (same_state(state, state_)) return {};
@@ -125,12 +128,13 @@ bool GroupSync::on_message(const Message& message, const Mac& from, uint32_t now
   }
   heard_any_ = true;
   last_seq_ = sync->seq;
-  if (was_silent && motion_master_) {
-    keeping_open_ = true;  // a Motion master may have changed Open/Closed here while the Coordinator was away
+  if (was_silent && motion_master_ && open_changed_locally_) {
+    keeping_open_ = true;  // Open/Closed changed here while the Coordinator was away
     return_seq_ = sync->seq;
   } else if (keeping_open_ && seq_is_newer(sync->seq, return_seq_)) {
     keeping_open_ = false;
   }
+  open_changed_locally_ = false;
   const bool own_open = state_.open;
   state_ = sync->state;
   if (keeping_open_) state_.open = own_open;
@@ -145,12 +149,14 @@ bool GroupSync::on_message(const Message& message, const Mac& from, uint32_t now
   return true;
 }
 
-bool GroupSync::on_master_presence(const Mac& sender, bool open, const std::optional<Mac>& master, uint32_t now_ms) {
+bool GroupSync::on_master_presence(const Mac& sender, bool open, bool coordinator_silent,
+                                   const std::optional<Mac>& master, uint32_t now_ms) {
   if (role_ != SyncRole::Coordinator || !master || sender != *master) return false;
-  const bool returned = !master_report_ || master_report_->first != sender ||
-                        now_ms - master_report_->second > kCoordinatorSilenceMs;
+  const bool first = !master_report_;
+  const bool new_report = first || master_report_->first != sender ||
+                          now_ms - master_report_->second > kCoordinatorSilenceMs;
   master_report_ = std::make_pair(sender, now_ms);
-  if (!returned) return false;
+  if (!first && !(coordinator_silent && new_report)) return false;
   state_.open = open;
   ++seq_;
   heartbeat_due_ = true;
@@ -168,8 +174,10 @@ std::vector<Outgoing> GroupSync::to_coordinator(const Message& body) {
 
 std::vector<Outgoing> GroupSync::report_presence(bool present, uint32_t total_presence_ms, bool open,
                                               uint32_t now_ms) {
-  const Presence presence{present, total_presence_ms, open};
-  if (silent(now_ms)) {
+  const bool is_silent = silent(now_ms);
+  const Presence presence{present, total_presence_ms, open, is_silent || reported_while_silent_};
+  reported_while_silent_ = is_silent;
+  if (is_silent) {
     return to_other_members(Message{MessageType::Presence, group_id_, self_, presence});
   }
   return to_coordinator(Message{MessageType::Presence, group_id_, self_, presence});
@@ -230,6 +238,7 @@ void GroupSync::regroup(uint32_t group_id, std::vector<Mac> members, const Group
   coordinator_.reset();
   heard_any_ = false;
   keeping_open_ = false;
+  open_changed_locally_ = false;
   motion_master_.reset();
   coordinator_boot_ = 0;
   counter_known_ = false;

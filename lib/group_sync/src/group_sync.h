@@ -68,13 +68,15 @@ class GroupSync {
   // its blink phase, the Wi-Fi channel it is on and the Motion master it currently knows (if any).
   std::vector<Outgoing> on_tick(uint32_t now_ms, uint8_t wifi_channel, std::optional<Mac> motion_master = std::nullopt);
   // On a Coordinator, after on_member_report accepted a Presence and it was fed to the election:
-  // when sender is the Motion master and it is the first report from that master since this Unit
-  // started, or more than kCoordinatorSilenceMs after the previous one from it, the Coordinator
-  // adopts open as its Group Open/Closed, bumps its seq and sends a Heartbeat with that state on
-  // the next on_tick whatever the interval. Returns true then. Any other report (the master heard
+  // when sender is the Motion master and it is the first report from a master since this Unit
+  // started (coordinator_silent or not), or coordinator_silent is true (the master reported it
+  // had lost the Coordinator, or its first report after hearing it again) and the sender differs
+  // from the last reporting master or more than kCoordinatorSilenceMs passed since its previous
+  // report, the Coordinator adopts open as its Group Open/Closed, bumps its seq and sends a Heartbeat with that state on
+  // the next on_tick whatever the interval. Returns true then. Any other report (an unflagged report after the first, a flagged one from the master heard
   // within kCoordinatorSilenceMs, a sender that is not the master, no master, not a Coordinator)
   // returns false and changes nothing.
-  bool on_master_presence(const Mac& sender, bool open, const std::optional<Mac>& master, uint32_t now_ms);
+  bool on_master_presence(const Mac& sender, bool open, bool coordinator_silent, const std::optional<Mac>& master, uint32_t now_ms);
   // State, Heartbeat and MatterSilent from this Group; anything else is ignored.
   // Hearing any of them turns an Undecided Unit into a Member; a Coordinator keeps its role.
   // Accepted only when: the message carries a valid tag for the Group secret (a wrong or
@@ -88,18 +90,18 @@ class GroupSync {
   // counter newer than the last accepted one (the first counter of a boot since this Unit
   // started is taken as it comes). A lower boot count is a captured frame and is ignored.
   // Ignored messages have no effect at all.
-  // A silent Member that knew a Motion master and accepts its first State or Heartbeat after the
-  // silence takes that message's Look and Motion enabled but keeps its own Open/Closed (it may have
-  // changed locally meanwhile, see on_local_change), and keeps doing so for further messages until
-  // one with a newer seq than that first one arrives, which applies fully. With no Motion master
-  // known, the first message after the silence applies fully.
+  // A silent Member that knew a Motion master and whose Open/Closed changed locally during the
+  // silence (see on_local_change) takes its first State or Heartbeat after the silence with that
+  // message's Look and Motion enabled but keeps its own Open/Closed, and keeps doing so for further
+  // messages until one with a newer seq than that first one arrives, which applies fully. Otherwise
+  // (no local Open/Closed change, or no Motion master known) the first message applies fully.
   // Returns true when the message was applied, false when it was ignored.
   bool on_message(const Message& message, const Mac& from, uint32_t now_ms);
 
   // A Member that knows its Coordinator: one signed Presence addressed to it, carrying the
   // sensor's reading and this Unit's current Group Open/Closed. While the Coordinator is silent
   // (see silent) the Presence goes to every other Group member instead, the Coordinator included
-  // so it hears the return. A Coordinator (it feeds its own sensor locally) or an Undecided Unit: nothing.
+  // so it hears the return; those, and the first one after the Coordinator is heard again, carry coordinator_silent. A Coordinator (it feeds its own sensor locally) or an Undecided Unit: nothing.
   std::vector<Outgoing> report_presence(bool present, uint32_t total_presence_ms, bool open, uint32_t now_ms);
   // Same routing, an OverrideClaim: this Unit's Sensor asks to become the Motion master.
   std::vector<Outgoing> claim_override();
@@ -177,6 +179,7 @@ class GroupSync {
   uint32_t seq_ = 0;
   bool sent_heartbeat_ = false;
   bool heartbeat_due_ = false;  // an adopted master state is sent without waiting for the interval
+  bool reported_while_silent_ = false;  // the last Presence report went out while the Coordinator was silent
   std::optional<std::pair<Mac, uint32_t>> master_report_;  // the Motion master and when it last reported
   uint32_t last_heartbeat_ms_ = 0;
   // Member side.
@@ -185,6 +188,7 @@ class GroupSync {
   // Set when the Coordinator returned after a silence during which a Motion master was known: the
   // Member keeps its own Open/Closed until a message newer than return_seq_ arrives.
   bool keeping_open_ = false;
+  bool open_changed_locally_ = false;  // Open/Closed changed here (on_local_change) during the current silence
   uint32_t return_seq_ = 0;
   std::optional<Mac> motion_master_;
   // Freshness of the Coordinator's frames: the highest boot count accepted (restored from

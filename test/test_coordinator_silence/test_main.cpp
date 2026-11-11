@@ -109,6 +109,15 @@ void test_a_silent_member_sends_its_presence_to_every_other_group_member() {
   TEST_ASSERT_TRUE(to_coordinator && to_other_member);
 }
 
+void test_a_member_that_never_lost_its_coordinator_never_flags_its_presence() {
+  sls::GroupSync coordinator = coordinator_unit();
+  sls::GroupSync member = member_unit(kMacs[1]);
+  TEST_ASSERT_TRUE(member.on_message(heartbeat_from(coordinator, 5000), kMacs[0], 5000));
+  std::vector<sls::Outgoing> out = member.report_presence(true, 700, true, 6000);
+  TEST_ASSERT_EQUAL(1, out.size());
+  TEST_ASSERT_FALSE(std::get<sls::Presence>(out[0].message.body).coordinator_silent);
+}
+
 void test_a_member_that_hears_its_coordinator_sends_its_presence_to_the_coordinator_only() {
   sls::GroupSync coordinator = coordinator_unit();
   sls::GroupSync member = member_unit(kMacs[1]);
@@ -421,6 +430,38 @@ void test_a_returning_member_with_no_known_master_applies_the_first_message_in_f
   TEST_ASSERT_FALSE(member.state().open);
 }
 
+void test_a_returning_member_that_changed_nothing_locally_applies_the_first_message_in_full() {
+  sls::GroupSync coordinator = coordinator_unit();
+  sls::GroupSync member = member_unit(kMacs[1]);
+  member.on_message(heartbeat_from(coordinator, 1000, kMacs[2]), kMacs[0], 1000);
+  coordinator.on_local_change(sls::apply(sls::default_group_state(), sls::Command::open()), 0);
+  TEST_ASSERT_TRUE(coordinator.state().open);
+  TEST_ASSERT_TRUE(member.on_message(heartbeat_from(coordinator, kSilentNow + 100), kMacs[0], kSilentNow + 100));
+  TEST_ASSERT_TRUE(member.state().open);
+}
+
+void test_a_silent_member_flags_its_presence_as_sent_while_the_coordinator_is_silent() {
+  sls::GroupSync member = silent_member_with_master();
+  std::vector<sls::Outgoing> out = member.report_presence(true, 700, true, kSilentNow);
+  TEST_ASSERT_TRUE(out.size() > 0);
+  for (const sls::Outgoing& o : out) TEST_ASSERT_TRUE(std::get<sls::Presence>(o.message.body).coordinator_silent);
+}
+
+void test_the_first_presence_after_the_coordinator_returns_is_flagged_and_later_ones_are_not() {
+  sls::GroupSync coordinator = coordinator_unit();
+  heartbeat_from(coordinator, 1000, kMacs[2]);  // the one silent_member_with_master heard
+  sls::GroupSync member = silent_member_with_master();
+  member.report_presence(true, 700, true, kSilentNow);
+  TEST_ASSERT_TRUE(member.on_message(heartbeat_from(coordinator, kSilentNow + 100), kMacs[0], kSilentNow + 100));
+  std::vector<sls::Outgoing> first = member.report_presence(true, 800, true, kSilentNow + 200);
+  TEST_ASSERT_EQUAL(1, first.size());
+  TEST_ASSERT_TRUE(first[0].to == kMacs[0]);
+  TEST_ASSERT_TRUE(std::get<sls::Presence>(first[0].message.body).coordinator_silent);
+  std::vector<sls::Outgoing> later = member.report_presence(true, 900, true, kSilentNow + 300);
+  TEST_ASSERT_EQUAL(1, later.size());
+  TEST_ASSERT_FALSE(std::get<sls::Presence>(later[0].message.body).coordinator_silent);
+}
+
 // A Coordinator that already sent its Heartbeat at 0, so the next one is due only 2 s later.
 static sls::GroupSync coordinator_after_first_heartbeat() {
   sls::GroupSync coordinator = coordinator_unit();
@@ -436,13 +477,13 @@ static const sls::StateSync* state_sync_to(const std::vector<sls::Outgoing>& out
 
 void test_a_coordinator_adopts_the_masters_open_state_on_its_first_report() {
   sls::GroupSync coordinator = coordinator_after_first_heartbeat();
-  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], true, kMacs[2], 500));
+  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], true, false, kMacs[2], 500));
   TEST_ASSERT_TRUE(coordinator.state().open);
 }
 
 void test_a_coordinator_that_adopted_the_masters_state_sends_a_heartbeat_right_away() {
   sls::GroupSync coordinator = coordinator_after_first_heartbeat();
-  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], true, kMacs[2], 500));
+  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], true, false, kMacs[2], 500));
   const sls::StateSync* sync = state_sync_to(coordinator.on_tick(600, 6, kMacs[2]), kMacs[1]);
   TEST_ASSERT_NOT_NULL(sync);
   TEST_ASSERT_TRUE(sync->state.open);
@@ -452,38 +493,51 @@ void test_a_coordinator_that_adopted_the_masters_state_sends_a_heartbeat_right_a
 
 void test_a_coordinator_ignores_a_report_within_ten_seconds_of_the_previous_one_from_the_master() {
   sls::GroupSync coordinator = coordinator_after_first_heartbeat();
-  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], true, kMacs[2], 500));
+  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], true, false, kMacs[2], 500));
   coordinator.on_tick(600, 6, kMacs[2]);
   coordinator.on_local_change(sls::apply(coordinator.state(), sls::Command::close()), 700);
-  TEST_ASSERT_FALSE(coordinator.on_master_presence(kMacs[2], true, kMacs[2], 500 + sls::kCoordinatorSilenceMs));
+  TEST_ASSERT_FALSE(coordinator.on_master_presence(kMacs[2], true, true, kMacs[2], 500 + sls::kCoordinatorSilenceMs));
   TEST_ASSERT_FALSE(coordinator.state().open);
 }
 
 void test_a_coordinator_adopts_again_when_the_master_was_quiet_for_more_than_ten_seconds() {
   sls::GroupSync coordinator = coordinator_after_first_heartbeat();
-  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], true, kMacs[2], 500));
+  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], true, false, kMacs[2], 500));
   coordinator.on_local_change(sls::apply(coordinator.state(), sls::Command::close()), 700);
-  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], true, kMacs[2], 500 + sls::kCoordinatorSilenceMs + 1));
+  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], true, true, kMacs[2], 500 + sls::kCoordinatorSilenceMs + 1));
   TEST_ASSERT_TRUE(coordinator.state().open);
+}
+
+void test_a_coordinator_ignores_the_stale_open_of_a_master_that_returns_without_having_lost_the_coordinator() {
+  sls::GroupSync coordinator = coordinator_after_first_heartbeat();
+  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], true, false, kMacs[2], 500));
+  coordinator.on_tick(600, 6, kMacs[2]);
+  coordinator.on_local_change(sls::apply(coordinator.state(), sls::Command::close()), 700);
+  coordinator.on_tick(800, 6, kMacs[2]);
+  const uint32_t back = 500 + sls::kCoordinatorSilenceMs + 1000;
+  coordinator.on_tick(back, 6, kMacs[2]);
+  TEST_ASSERT_FALSE(coordinator.on_master_presence(kMacs[2], true, false, kMacs[2], back));
+  TEST_ASSERT_FALSE(coordinator.state().open);
+  TEST_ASSERT_EQUAL(0, coordinator.on_tick(back + 100, 6, kMacs[2]).size());
 }
 
 void test_a_coordinator_ignores_a_report_that_is_not_from_the_master() {
   sls::GroupSync coordinator = coordinator_after_first_heartbeat();
-  TEST_ASSERT_FALSE(coordinator.on_master_presence(kMacs[1], true, kMacs[2], 500));
-  TEST_ASSERT_FALSE(coordinator.on_master_presence(kMacs[2], true, std::nullopt, 500));
+  TEST_ASSERT_FALSE(coordinator.on_master_presence(kMacs[1], true, false, kMacs[2], 500));
+  TEST_ASSERT_FALSE(coordinator.on_master_presence(kMacs[2], true, false, std::nullopt, 500));
   TEST_ASSERT_FALSE(coordinator.state().open);
   TEST_ASSERT_EQUAL(0, coordinator.on_tick(600, 6, kMacs[2]).size());
 }
 
 void test_a_member_does_not_adopt_a_masters_state() {
   sls::GroupSync member = member_unit(kMacs[1]);
-  TEST_ASSERT_FALSE(member.on_master_presence(kMacs[2], true, kMacs[2], 500));
+  TEST_ASSERT_FALSE(member.on_master_presence(kMacs[2], true, false, kMacs[2], 500));
   TEST_ASSERT_FALSE(member.state().open);
 }
 
 void test_a_local_change_to_the_adopted_state_sends_nothing() {
   sls::GroupSync coordinator = coordinator_after_first_heartbeat();
-  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], true, kMacs[2], 500));
+  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], true, false, kMacs[2], 500));
   TEST_ASSERT_EQUAL(0, coordinator.on_local_change(sls::apply(sls::default_group_state(), sls::Command::open()), 600).size());
 }
 
@@ -491,7 +545,7 @@ void test_a_returning_member_holding_open_applies_the_coordinators_adopted_open_
   sls::GroupSync coordinator = coordinator_unit();
   sls::GroupSync member = silent_member_opened_locally(coordinator, kMacs[2]);
   TEST_ASSERT_TRUE(member.on_message(heartbeat_from(coordinator, kSilentNow + 100), kMacs[0], kSilentNow + 100));
-  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], false, kMacs[2], kSilentNow + 200));
+  TEST_ASSERT_TRUE(coordinator.on_master_presence(kMacs[2], false, false, kMacs[2], kSilentNow + 200));
   TEST_ASSERT_TRUE(member.on_message(heartbeat_from(coordinator, kSilentNow + 300), kMacs[0], kSilentNow + 300));
   TEST_ASSERT_FALSE(member.state().open);
 }
@@ -531,6 +585,9 @@ int main() {
   RUN_TEST(test_a_silent_member_keeps_a_local_change_and_sends_nothing);
   RUN_TEST(test_a_member_that_hears_its_coordinator_still_ignores_a_local_change);
   RUN_TEST(test_a_silent_member_sends_its_presence_to_every_other_group_member);
+  RUN_TEST(test_a_silent_member_flags_its_presence_as_sent_while_the_coordinator_is_silent);
+  RUN_TEST(test_the_first_presence_after_the_coordinator_returns_is_flagged_and_later_ones_are_not);
+  RUN_TEST(test_a_member_that_never_lost_its_coordinator_never_flags_its_presence);
   RUN_TEST(test_a_member_that_hears_its_coordinator_sends_its_presence_to_the_coordinator_only);
   RUN_TEST(test_a_silent_member_accepts_a_presence_from_the_motion_master);
   RUN_TEST(test_a_member_that_still_hears_its_coordinator_ignores_a_presence);
@@ -544,10 +601,12 @@ int main() {
   RUN_TEST(test_a_returning_member_keeps_its_open_state_through_later_heartbeats);
   RUN_TEST(test_a_returning_member_follows_the_coordinators_next_state_change_in_full);
   RUN_TEST(test_a_returning_member_with_no_known_master_applies_the_first_message_in_full);
+  RUN_TEST(test_a_returning_member_that_changed_nothing_locally_applies_the_first_message_in_full);
   RUN_TEST(test_a_coordinator_adopts_the_masters_open_state_on_its_first_report);
   RUN_TEST(test_a_coordinator_that_adopted_the_masters_state_sends_a_heartbeat_right_away);
   RUN_TEST(test_a_coordinator_ignores_a_report_within_ten_seconds_of_the_previous_one_from_the_master);
   RUN_TEST(test_a_coordinator_adopts_again_when_the_master_was_quiet_for_more_than_ten_seconds);
+  RUN_TEST(test_a_coordinator_ignores_the_stale_open_of_a_master_that_returns_without_having_lost_the_coordinator);
   RUN_TEST(test_a_coordinator_ignores_a_report_that_is_not_from_the_master);
   RUN_TEST(test_a_member_does_not_adopt_a_masters_state);
   RUN_TEST(test_a_local_change_to_the_adopted_state_sends_nothing);

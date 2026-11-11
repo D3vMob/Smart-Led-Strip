@@ -47,6 +47,8 @@ struct Presence {
   bool present;
   uint32_t total_presence_ms;
   bool open;  // the sender's current Group Open/Closed
+  // the sender sent this while it considered the Coordinator silent, or it is its first report after the Coordinator returned
+  bool coordinator_silent;
 };
 
 struct ChannelMoved {
