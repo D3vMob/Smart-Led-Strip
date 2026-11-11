@@ -792,6 +792,149 @@ void test_after_re_pairing_only_frames_signed_with_the_new_group_secret_are_hear
   TEST_ASSERT_TRUE(member.record().coordinator == std::optional<sls::Mac>(kMacs[2]));
 }
 
+void test_a_member_ignores_a_correctly_signed_presence_or_override_claim() {
+  std::vector<sls::Mac> table(kMacs, kMacs + 3);
+  sls::GroupSync member(kMacs[1], kGroupId, table, kSecret, sls::SyncRecord{sls::SyncRole::Member}, kBootCount, sls::default_group_state());
+  sls::Message presence = signed_msg(sls::Message{sls::MessageType::Presence, kGroupId, kMacs[0], sls::Presence{true, 500}});
+  sls::Message claim = signed_msg(sls::Message{sls::MessageType::OverrideClaim, kGroupId, kMacs[0], std::monostate{}});
+  TEST_ASSERT_FALSE(member.on_message(presence, kMacs[0], 1000) || member.on_message(claim, kMacs[0], 1100));
+}
+
+static std::vector<sls::Mac> three_macs() { return std::vector<sls::Mac>(kMacs, kMacs + 3); }
+
+static sls::GroupSync member_unit(const sls::Mac& self, uint32_t boot = kBootCount) {
+  return sls::GroupSync(self, kGroupId, three_macs(), kSecret, sls::SyncRecord{sls::SyncRole::Member, kMacs[0], 0}, boot,
+                        sls::default_group_state());
+}
+
+static sls::GroupSync coordinator_unit() {
+  return sls::GroupSync(kMacs[0], kGroupId, three_macs(), kSecret, sls::SyncRecord{sls::SyncRole::Coordinator}, kBootCount,
+                        sls::default_group_state());
+}
+
+void test_a_member_reports_presence_to_its_coordinator_with_a_valid_tag_and_a_rising_counter() {
+  sls::GroupSync member = member_unit(kMacs[1]);
+  std::vector<sls::Outgoing> first = member.report_presence(true, 4200);
+  std::vector<sls::Outgoing> second = member.report_presence(false, 4300);
+  TEST_ASSERT_EQUAL(1, first.size());
+  TEST_ASSERT_TRUE(first[0].to == kMacs[0]);
+  TEST_ASSERT_EQUAL(static_cast<int>(sls::MessageType::Presence), static_cast<int>(first[0].message.type));
+  const sls::Presence* body = std::get_if<sls::Presence>(&first[0].message.body);
+  TEST_ASSERT_NOT_NULL(body);
+  TEST_ASSERT_TRUE(body->present);
+  TEST_ASSERT_EQUAL_UINT32(4200, body->total_presence_ms);
+  TEST_ASSERT_TRUE(first[0].message.sender == kMacs[1]);
+  TEST_ASSERT_TRUE(sls::verify(first[0].message, kSecret));
+  TEST_ASSERT_EQUAL(1, second.size());
+  TEST_ASSERT_TRUE(second[0].message.auth.counter > first[0].message.auth.counter);
+}
+
+void test_a_member_claims_the_override_with_a_signed_message_to_its_coordinator() {
+  sls::GroupSync member = member_unit(kMacs[1]);
+  std::vector<sls::Outgoing> out = member.claim_override();
+  TEST_ASSERT_EQUAL(1, out.size());
+  TEST_ASSERT_TRUE(out[0].to == kMacs[0]);
+  TEST_ASSERT_EQUAL(static_cast<int>(sls::MessageType::OverrideClaim), static_cast<int>(out[0].message.type));
+  TEST_ASSERT_TRUE(sls::verify(out[0].message, kSecret));
+}
+
+void test_a_coordinator_or_undecided_unit_sends_no_report() {
+  sls::GroupSync coordinator = coordinator_unit();
+  sls::GroupSync undecided(kMacs[2], kGroupId, three_macs(), kSecret, sls::SyncRecord{sls::SyncRole::Undecided}, kBootCount,
+                           sls::default_group_state());
+  TEST_ASSERT_EQUAL(0, coordinator.report_presence(true, 1).size() + coordinator.claim_override().size());
+  TEST_ASSERT_EQUAL(0, undecided.report_presence(true, 1).size() + undecided.claim_override().size());
+}
+
+void test_a_coordinator_accepts_a_members_signed_presence_and_override_claim() {
+  sls::GroupSync coordinator = coordinator_unit();
+  sls::GroupSync member = member_unit(kMacs[1]);
+  sls::Message presence = member.report_presence(true, 10)[0].message;
+  sls::Message claim = member.claim_override()[0].message;
+  TEST_ASSERT_TRUE(coordinator.on_member_report(presence, kMacs[1]));
+  TEST_ASSERT_TRUE(coordinator.on_member_report(claim, kMacs[1]));
+}
+
+void test_a_coordinator_rejects_a_report_with_a_bad_tag() {
+  sls::GroupSync coordinator = coordinator_unit();
+  sls::GroupSync member = member_unit(kMacs[1]);
+  sls::Message presence = member.report_presence(true, 10)[0].message;
+  std::get<sls::Presence>(presence.body).total_presence_ms = 11;
+  TEST_ASSERT_FALSE(coordinator.on_member_report(presence, kMacs[1]));
+}
+
+void test_a_coordinator_rejects_a_report_from_a_non_member_or_a_spoofed_source() {
+  sls::GroupSync coordinator = coordinator_unit();
+  sls::GroupSync member = member_unit(kMacs[1]);
+  sls::Message presence = member.report_presence(true, 10)[0].message;
+  const sls::Mac stranger = {0x02, 0, 0, 0, 0, 0x09};
+  sls::GroupSync outsider(stranger, kGroupId, three_macs(), kSecret, sls::SyncRecord{sls::SyncRole::Member, kMacs[0], 0},
+                          kBootCount, sls::default_group_state());
+  sls::Message from_stranger = outsider.report_presence(true, 10)[0].message;
+  TEST_ASSERT_FALSE(coordinator.on_member_report(from_stranger, stranger));
+  TEST_ASSERT_FALSE(coordinator.on_member_report(presence, kMacs[2]));
+  TEST_ASSERT_FALSE(coordinator.on_member_report(presence, kMacs[0]));
+}
+
+void test_a_coordinator_rejects_a_replayed_report() {
+  sls::GroupSync coordinator = coordinator_unit();
+  sls::GroupSync member = member_unit(kMacs[1]);
+  sls::Message presence = member.report_presence(true, 10)[0].message;
+  TEST_ASSERT_TRUE(coordinator.on_member_report(presence, kMacs[1]));
+  TEST_ASSERT_FALSE(coordinator.on_member_report(presence, kMacs[1]));
+}
+
+void test_a_coordinator_rejects_an_older_counter_in_the_same_boot() {
+  sls::GroupSync coordinator = coordinator_unit();
+  sls::GroupSync member = member_unit(kMacs[1]);
+  sls::Message older = member.report_presence(true, 10)[0].message;
+  sls::Message newer = member.report_presence(false, 20)[0].message;
+  TEST_ASSERT_TRUE(coordinator.on_member_report(newer, kMacs[1]));
+  TEST_ASSERT_FALSE(coordinator.on_member_report(older, kMacs[1]));
+}
+
+void test_a_coordinator_rejects_an_older_boot_and_accepts_a_newer_one() {
+  sls::GroupSync coordinator = coordinator_unit();
+  sls::GroupSync before = member_unit(kMacs[1], kBootCount);
+  sls::GroupSync after = member_unit(kMacs[1], kRebootedBootCount);
+  sls::Message old_boot = before.report_presence(true, 10)[0].message;
+  sls::Message new_boot = after.report_presence(true, 10)[0].message;
+  TEST_ASSERT_TRUE(coordinator.on_member_report(new_boot, kMacs[1]));
+  TEST_ASSERT_FALSE(coordinator.on_member_report(old_boot, kMacs[1]));
+
+  sls::GroupSync other_coordinator = coordinator_unit();
+  sls::GroupSync restarted = member_unit(kMacs[1], kBootCount);
+  sls::Message low = restarted.report_presence(true, 10)[0].message;
+  TEST_ASSERT_TRUE(other_coordinator.on_member_report(low, kMacs[1]));
+  TEST_ASSERT_TRUE(other_coordinator.on_member_report(new_boot, kMacs[1]));
+}
+
+void test_freshness_is_tracked_per_sender() {
+  sls::GroupSync coordinator = coordinator_unit();
+  sls::GroupSync a = member_unit(kMacs[1], kRebootedBootCount);
+  sls::GroupSync b = member_unit(kMacs[2], kBootCount);
+  TEST_ASSERT_TRUE(coordinator.on_member_report(a.report_presence(true, 1)[0].message, kMacs[1]));
+  TEST_ASSERT_TRUE(coordinator.on_member_report(b.report_presence(true, 1)[0].message, kMacs[2]));
+}
+
+void test_a_non_coordinator_rejects_every_report() {
+  sls::GroupSync member = member_unit(kMacs[1]);
+  sls::GroupSync sender = member_unit(kMacs[2]);
+  sls::Message presence = sender.report_presence(true, 10)[0].message;
+  sls::Message claim = sender.claim_override()[0].message;
+  TEST_ASSERT_FALSE(member.on_member_report(presence, kMacs[2]) || member.on_member_report(claim, kMacs[2]));
+}
+
+void test_regrouping_clears_the_freshness_kept_for_each_sender() {
+  sls::GroupSync coordinator = coordinator_unit();
+  sls::GroupSync member = member_unit(kMacs[1]);
+  sls::Message report = member.report_presence(true, 10)[0].message;
+  TEST_ASSERT_TRUE(coordinator.on_member_report(report, kMacs[1]));
+  coordinator.regroup(kGroupId, three_macs(), kSecret);
+  coordinator.on_commissioned(0);
+  TEST_ASSERT_TRUE(coordinator.on_member_report(report, kMacs[1]));
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_a_sync_message_with_a_wrong_or_missing_tag_is_ignored);
@@ -845,5 +988,18 @@ int main() {
   RUN_TEST(test_re_pairing_clears_a_coordinators_role);
   RUN_TEST(test_after_re_pairing_only_frames_signed_with_the_new_group_secret_are_heard);
   RUN_TEST(test_re_pairing_resets_the_saved_boot_count);
+  RUN_TEST(test_a_member_reports_presence_to_its_coordinator_with_a_valid_tag_and_a_rising_counter);
+  RUN_TEST(test_a_member_claims_the_override_with_a_signed_message_to_its_coordinator);
+  RUN_TEST(test_a_coordinator_or_undecided_unit_sends_no_report);
+  RUN_TEST(test_a_coordinator_accepts_a_members_signed_presence_and_override_claim);
+  RUN_TEST(test_a_coordinator_rejects_a_report_with_a_bad_tag);
+  RUN_TEST(test_a_coordinator_rejects_a_report_from_a_non_member_or_a_spoofed_source);
+  RUN_TEST(test_a_coordinator_rejects_a_replayed_report);
+  RUN_TEST(test_a_coordinator_rejects_an_older_counter_in_the_same_boot);
+  RUN_TEST(test_a_coordinator_rejects_an_older_boot_and_accepts_a_newer_one);
+  RUN_TEST(test_freshness_is_tracked_per_sender);
+  RUN_TEST(test_a_non_coordinator_rejects_every_report);
+  RUN_TEST(test_regrouping_clears_the_freshness_kept_for_each_sender);
+  RUN_TEST(test_a_member_ignores_a_correctly_signed_presence_or_override_claim);
   return UNITY_END();
 }

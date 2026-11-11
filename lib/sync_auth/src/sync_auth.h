@@ -20,7 +20,7 @@ using GroupSecret = std::array<uint8_t, 32>;
 // Sets message.auth.tag: the first kSyncTagBytes of HMAC-SHA256(secret, encoded frame with the tag zeroed).
 void sign(Message& message, const GroupSecret& secret);
 
-// True only for a MatterSilent, State or Heartbeat whose tag matches. Compared in constant time.
+// True only for a State, Heartbeat, MatterSilent, Presence or OverrideClaim whose tag matches. Compared in constant time.
 bool verify(const Message& message, const GroupSecret& secret);
 
 }  // namespace sls

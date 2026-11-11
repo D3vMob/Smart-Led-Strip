@@ -550,7 +550,7 @@ void test_state_wire_layout_matches_the_golden_bytes() {
   message.auth = sample_auth();
 
   const uint8_t expected[] = {
-      'S', 'L', 2, 1,                          // magic, version, type
+      'S', 'L', 3, 1,                          // magic, version, type
       0x44, 0x33, 0x22, 0x11,                  // group id, little-endian
       0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5,      // sender MAC
       0x01,                                    // color_mode
@@ -598,7 +598,8 @@ void test_state_wire_layout_matches_the_golden_bytes() {
 
 void test_sync_messages_keep_their_auth_fields_across_encode_and_decode() {
   const sls::MessageType synced[] = {sls::MessageType::State, sls::MessageType::Heartbeat,
-                                     sls::MessageType::MatterSilent};
+                                     sls::MessageType::MatterSilent, sls::MessageType::Presence,
+                                     sls::MessageType::OverrideClaim};
   for (sls::MessageType type : synced) {
     sls::Message message = sample_message(type);
     message.auth = sample_auth();
@@ -616,7 +617,8 @@ void test_sync_messages_keep_their_auth_fields_across_encode_and_decode() {
 
 void test_sync_frame_one_byte_short_of_the_auth_trailer_is_rejected_as_truncated() {
   const sls::MessageType synced[] = {sls::MessageType::State, sls::MessageType::Heartbeat,
-                                     sls::MessageType::MatterSilent};
+                                     sls::MessageType::MatterSilent, sls::MessageType::Presence,
+                                     sls::MessageType::OverrideClaim};
   for (sls::MessageType type : synced) {
     uint8_t buf[sls::kMaxMessageBytes];
     size_t full = sls::encode(sample_message(type), buf, sizeof(buf));
@@ -626,10 +628,8 @@ void test_sync_frame_one_byte_short_of_the_auth_trailer_is_rejected_as_truncated
   }
 }
 
-void test_messages_without_sync_auth_carry_no_auth_bytes() {
+void test_channel_moved_carries_no_auth_bytes() {
   uint8_t buf[sls::kMaxMessageBytes];
-  TEST_ASSERT_EQUAL_UINT32(14, sls::encode(sample_message(sls::MessageType::OverrideClaim), buf, sizeof(buf)));
-  TEST_ASSERT_EQUAL_UINT32(14 + 5, sls::encode(sample_message(sls::MessageType::Presence), buf, sizeof(buf)));
   TEST_ASSERT_EQUAL_UINT32(14 + 1, sls::encode(sample_message(sls::MessageType::ChannelMoved), buf, sizeof(buf)));
 }
 
@@ -638,7 +638,7 @@ int main() {
   RUN_TEST(test_state_message_round_trips_with_every_field_intact);
   RUN_TEST(test_sync_messages_keep_their_auth_fields_across_encode_and_decode);
   RUN_TEST(test_sync_frame_one_byte_short_of_the_auth_trailer_is_rejected_as_truncated);
-  RUN_TEST(test_messages_without_sync_auth_carry_no_auth_bytes);
+  RUN_TEST(test_channel_moved_carries_no_auth_bytes);
   RUN_TEST(test_heartbeat_message_round_trips_with_every_field_intact);
   RUN_TEST(test_presence_message_round_trips_onset_and_absence);
   RUN_TEST(test_pairing_hello_and_ack_decode_for_unpaired_unit);

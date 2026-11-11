@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "blink.h"
@@ -74,6 +75,20 @@ class GroupSync {
   // Returns true when the message was applied, false when it was ignored.
   bool on_message(const Message& message, const Mac& from, uint32_t now_ms);
 
+  // A Member that knows its Coordinator: one signed Presence addressed to it, carrying the
+  // sensor's reading. A Coordinator (it feeds its own sensor locally) or an Undecided Unit: nothing.
+  std::vector<Outgoing> report_presence(bool present, uint32_t total_presence_ms);
+  // Same routing, an OverrideClaim: this Unit's Sensor asks to become the Motion master.
+  std::vector<Outgoing> claim_override();
+  // On the Coordinator: a Presence or OverrideClaim from another Group member. Accepted only
+  // when it carries a valid tag for the Group secret, from (the radio source MAC) is a Group
+  // member other than this Unit and equals message.sender, and it is fresh for that sender:
+  // a higher boot count than the last accepted from it, or the same boot count with a newer
+  // counter (the first report from a sender since this Unit started is taken as it comes).
+  // Any other role or type, or a failed check, is ignored with no effect.
+  // Returns true when the report was accepted.
+  bool on_member_report(const Message& message, const Mac& from);
+
   // Matter commissioning is scanning for or joining the router; the radio must
   // not move meanwhile, so listen_channel returns 0 until it stops.
   void on_commissioning(bool in_progress);
@@ -104,6 +119,7 @@ class GroupSync {
 
  private:
   std::vector<Outgoing> to_other_members(MessageType type, const StateSync* sync);
+  std::vector<Outgoing> to_coordinator(const Message& body);
   void realign_blink(const StateSync& sync, uint32_t now_ms);
 
   Mac self_;
@@ -128,6 +144,8 @@ class GroupSync {
   uint32_t coordinator_boot_ = 0;
   bool counter_known_ = false;
   uint32_t last_counter_ = 0;
+  // Coordinator side: the last (boot count, counter) accepted from each Member's reports.
+  std::vector<std::pair<Mac, SyncAuth>> last_report_;
   uint32_t last_seq_ = 0;
   uint32_t last_heard_ms_ = 0;
   bool commissioning_ = false;
