@@ -10,10 +10,7 @@ namespace sls {
 namespace {
 // Whether two Group states would look and behave the same.
 bool same_state(const GroupState& a, const GroupState& b) {
-  return a.open == b.open && a.motion_enabled == b.motion_enabled && a.look.color_mode == b.look.color_mode &&
-         a.look.hue_deg == b.look.hue_deg && a.look.saturation == b.look.saturation &&
-         a.look.color_temp_mireds == b.look.color_temp_mireds && a.look.brightness_pct == b.look.brightness_pct &&
-         a.look.blink_on == b.look.blink_on && a.look.blink_speed_pct == b.look.blink_speed_pct;
+  return a.open == b.open && a.motion_enabled == b.motion_enabled && a.look == b.look;
 }
 }  // namespace
 

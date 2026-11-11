@@ -163,12 +163,6 @@ void run_member_motion_rules(uint32_t now_ms) {
   feed_motion_rules(member_presence, now_ms);
 }
 
-bool same_look(const sls::Look& a, const sls::Look& b) {
-  return a.color_mode == b.color_mode && a.hue_deg == b.hue_deg && a.saturation == b.saturation &&
-         a.color_temp_mireds == b.color_temp_mireds && a.brightness_pct == b.brightness_pct &&
-         a.blink_on == b.blink_on && a.blink_speed_pct == b.blink_speed_pct;
-}
-
 // Sends this Sensor unit's presence level to whoever runs the election.
 void send_presence_report(uint32_t now_ms) {
   if (runs_election()) {
@@ -407,7 +401,7 @@ void loop() {
     matter_endpoints::sync(group_state);
     if (was_open && !group_state.open) {
       motion_feed.on_manual_close();
-    } else if (group_state.open && !same_look(look_before, group_state.look)) {
+    } else if (group_state.open && look_before != group_state.look) {
       motion_feed.on_explicit_open();
     }
     if (matter_endpoints::commissioned() && group_sync->role() != sls::SyncRole::Coordinator) {

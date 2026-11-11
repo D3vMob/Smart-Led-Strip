@@ -19,6 +19,14 @@ struct Look {
   uint8_t blink_speed_pct;
 };
 
+// Whether two Looks render the same.
+inline bool operator==(const Look& a, const Look& b) {
+  return a.color_mode == b.color_mode && a.hue_deg == b.hue_deg && a.saturation == b.saturation &&
+         a.color_temp_mireds == b.color_temp_mireds && a.brightness_pct == b.brightness_pct &&
+         a.blink_on == b.blink_on && a.blink_speed_pct == b.blink_speed_pct;
+}
+inline bool operator!=(const Look& a, const Look& b) { return !(a == b); }
+
 struct GroupState {
   Look look;
   bool open;
