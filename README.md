@@ -2,6 +2,8 @@
 
 PlatformIO firmware for a Seeed XIAO ESP32-C6 driving a NeoPixel strip, controlled by voice through Matter over Wi-Fi (Alexa, Google Home).
 
+See the [User Manual](docs/USER_MANUAL.md) for setup, grouping, motion, troubleshooting and upcoming features.
+
 ## Voice control
 
 Each Unit is a Matter device with five fixed endpoints:
