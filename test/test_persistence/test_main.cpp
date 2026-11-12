@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 adesbiens
+
 #include <unity.h>
 #include "persisted_state.h"
 #include "save_scheduler.h"

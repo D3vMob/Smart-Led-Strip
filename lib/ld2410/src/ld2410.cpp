@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 adesbiens
+
 #include "ld2410.h"
 
 namespace sls {

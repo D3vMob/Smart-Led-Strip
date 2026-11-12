@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 adesbiens
+
 #pragma once
 // Compile-time hardware configuration shared by every Unit's build.
 // Header-free so native tests can include it; LED_PIXEL_TYPE expands where

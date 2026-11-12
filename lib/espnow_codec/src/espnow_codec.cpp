@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 adesbiens
+
 #include "espnow_codec.h"
 
 #include "hue_picker.h"

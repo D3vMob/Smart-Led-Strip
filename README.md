@@ -38,3 +38,11 @@ This also clears the saved Look and Open/Closed state. The Unit then boots uncom
 ## Tests
 
 Pure logic lives in `lib/` and runs on the host: `pio test -e native`.
+
+## License
+
+Copyright (C) 2026 adesbiens
+
+This project is licensed under the GNU General Public License v3.0 (`GPL-3.0-only`). See [`LICENSE`](LICENSE) for the full text.
+
+If you distribute this firmware, or devices running a modified version of it, you must make the corresponding source code available under the same license.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 adesbiens
+
 #include "hue_picker.h"
 
 namespace sls {
